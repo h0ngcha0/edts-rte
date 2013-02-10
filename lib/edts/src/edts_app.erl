@@ -54,8 +54,11 @@ start() ->
   application:start(syntax_tools),
   application:start(lager),
 
-  application:start(edts).
+  %% create the table
+  application:start(mnesia),
+  ensure_tables_exist(),
 
+  application:start(edts).
 
 %% Application callbacks
 start(_StartType, _Start) ->
@@ -65,6 +68,18 @@ stop(_State) ->
   ok.
 
 %%%_* Internal functions =======================================================
+ensure_tables_exist() ->
+  lists:foreach(fun ensure_table/1, table_modules()).
+
+ensure_table(Mod) ->
+  case Mod:create_table() of
+    {aborted,{already_exists,_}} -> ok;
+    {atomic, ok}                 -> ok
+  end.
+
+table_modules() ->
+  [ edts_rte_code_editor
+  ].
 
 %%%_* Emacs ====================================================================
 %%% Local Variables:
