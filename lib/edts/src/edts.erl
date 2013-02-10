@@ -29,12 +29,16 @@
 
 %% API
 -export([compile_and_load/2,
+         debugger_continue/1,
+         debugger_toggle_breakpoint/3,
+         get_breakpoints/1,
          get_dialyzer_result/4,
          get_function_info/4,
          get_module_eunit_result/2,
          get_module_info/3,
          get_module_xref_analysis/3,
          init_node/3,
+         interpret_modules/2,
          is_node/1,
          node_available_p/1,
          modules/1,
@@ -70,6 +74,54 @@ compile_and_load(Node, Filename) ->
     Result      -> Result
   end.
 
+%%------------------------------------------------------------------------------
+%% @doc
+%% Continue execution until a breakpoint is hit or execution terminates.
+%% @end
+-spec debugger_continue(Node :: node())
+                       -> {ok, Info :: term()} | {error, not_found}.
+%%------------------------------------------------------------------------------
+debugger_continue(Node) ->
+  case edts_dist:call(Node, edts_rett_server, continue, []) of
+    {badrpc, _} -> {error, not_found};
+    Result      -> Result
+  end.
+
+%%------------------------------------------------------------------------------
+%% @doc
+%% Toggles a breakpoint in Module:Line at Node.
+%% @end
+-spec debugger_toggle_breakpoint( Node   :: node()
+                                , Module :: module()
+                                , Line   :: non_neg_integer())
+                                ->
+                                    {ok, set, {Module, Line}}
+                                    | {ok, unset, {Module, Line}}
+                                    | {error, not_found}.
+%%------------------------------------------------------------------------------
+debugger_toggle_breakpoint(Node, Module, Line) ->
+  Args = [Module, Line],
+  case edts_dist:call(Node, edts_rett_server, toggle_breakpoint, Args) of
+    {badrpc, _} -> {error, not_found};
+    Result      -> Result
+  end.
+
+%%------------------------------------------------------------------------------
+%% @doc
+%% Returns information about all breakpoints on Node.
+%% @end
+%%
+-spec get_breakpoints(Node :: node()) -> [{ { Module  :: module()
+                                            , Line    :: non_neg_integer()
+                                            }
+                                          , Options :: [term()]
+                                          }].
+%%------------------------------------------------------------------------------
+get_breakpoints(Node) ->
+  case edts_dist:call(Node, edts_rett_server, get_breakpoints, []) of
+    {badrpc, _} -> {error, not_found};
+    Result      -> Result
+  end.
 
 %%------------------------------------------------------------------------------
 %% @doc
@@ -208,6 +260,21 @@ get_module_xref_analysis(Node, Modules, Checks) ->
 %%------------------------------------------------------------------------------
 init_node(Node, ProjectRoot, LibDirs) ->
   edts_server:init_node(Node, ProjectRoot, LibDirs).
+
+%%------------------------------------------------------------------------------
+%% @doc
+%% Interprets Modules in Node, if possible, returning the list of interpreted
+%% modules.
+%% @end
+-spec interpret_modules( Node :: node()
+                       , Modules :: [module()] ) ->
+                           [module()] | {error, not_found}.
+%%------------------------------------------------------------------------------
+interpret_modules(Node, Modules) ->
+  case edts_dist:call(Node, edts_rett_server, interpret_modules, [Modules]) of
+    {badrpc, _} -> {error, not_found};
+    Interpreted -> Interpreted
+  end.
 
 %%------------------------------------------------------------------------------
 %% @doc

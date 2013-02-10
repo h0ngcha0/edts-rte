@@ -1,0 +1,54 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Realtime Erlang Editor</title>
+
+    <link rel="stylesheet" type="text/css" href="/rte/static/css/bootstrap.css" />
+    <link rel="stylesheet" type="text/css" href="/rte/static/css/bootstrap-responsive.css" />
+    <link rel="stylesheet" type="text/css" href="/rte/static/css/prettify.css" />
+    <link rel="stylesheet" type="text/css" href="/rte/static/css/codemirror.css" />
+    <link rel="stylesheet" type="text/css" href="/rte/static/css/erlang-dark.css" />
+    <link rel="stylesheet" type="text/css" href="/rte/static/css/docs.css" />
+    <link rel="stylesheet" type="text/css" href="/rte/static/css/rte.css" />
+
+    <script type="text/javascript" src="/rte/static/js/jquery.min.js"></script>
+    <script type="text/javascript" src="/rte/static/js/jquery-ui-1.9.2.custom.min.js"></script>
+    <script type="text/javascript" src="/rte/static/js/underscore.js"></script>
+    <script type="text/javascript" src="/rte/static/js/backbone.js"></script>
+    <script type="text/javascript" src="/rte/static/js/prettify.js"></script>
+    <script type="text/javascript" src="/rte/static/js/handlebars.js"></script>
+    <script type="text/javascript" src="/rte/static/js/bootstrap.js"></script>
+    <script type="text/javascript" src="/rte/static/js/codemirror.js"></script>
+    <script type="text/javascript" src="/rte/static/js/erlang.js"></script>
+    <script type="text/javascript" src="/rte/static/js/rte.js"></script>
+
+    <script type="text/javascript">
+      $(document).ready(function() {
+        g_appview = new AppView();
+      });
+    </script>
+
+    <style type="text/css">
+      body {
+        padding-top: 60px;
+        padding-bottom: 40px;
+      }
+    </style>
+  </head>
+
+  <body>
+    <div class="navbar navbar-fixed-top">
+      <div class="navbar-inner">
+        <div class="container">
+          <!-- show the app name -->
+          <a class="brand" href="#">RTEE</a>
+        </div>
+      </div>
+    </div>
+    <div id="rett" class="container">
+      <div id="code-editors" class="container">
+      </div>
+    </div>
+  </body>
+</html>

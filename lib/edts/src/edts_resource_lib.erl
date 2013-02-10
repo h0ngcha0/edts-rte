@@ -29,6 +29,7 @@
 
 %% Application callbacks
 -export([ exists_p/3
+        , encode_debugger_info/1
         , make_nodename/1
         , validate/3]).
 
@@ -107,12 +108,14 @@ atom_to_exists_p(module)   -> fun module_exists_p/2;
 atom_to_exists_p(modules)  -> fun modules_exists_p/2.
 
 term_to_validate(arity)        -> fun arity_validate/2;
+term_to_validate(cmd)          -> fun cmd_validate/2;
 term_to_validate(exported)     -> fun exported_validate/2;
 term_to_validate(file)         -> fun file_validate/2;
 term_to_validate(files)        -> fun files_validate/2;
 term_to_validate(function)     -> fun function_validate/2;
 term_to_validate(info_level)   -> fun info_level_validate/2;
 term_to_validate(lib_dirs)     -> fun lib_dirs_validate/2;
+term_to_validate(line)         -> fun line_validate/2;
 term_to_validate(module)       -> fun module_validate/2;
 term_to_validate(modules)      -> fun modules_validate/2;
 term_to_validate(nodename)     -> fun nodename_validate/2;
@@ -139,6 +142,18 @@ arity_validate(ReqData, _Ctx) ->
   end.
 
 
+%%------------------------------------------------------------------------------
+%% @doc
+%% Validate debugger command
+%% @end
+-spec cmd_validate(wrq:req_data(), orddict:orddict()) ->
+                      {ok, atom()} | error.
+%%------------------------------------------------------------------------------
+cmd_validate(ReqData, _Ctx) ->
+  case wrq:path_info(cmd, ReqData) of
+    undefined         -> io:format("no cmd~n"),error;
+    L when is_list(L) -> {ok, list_to_atom(L)}
+  end.
 
 %%------------------------------------------------------------------------------
 %% @doc
@@ -247,6 +262,16 @@ lib_dirs_validate(ReqData, Ctx) ->
   LibDirs    = lists:map(fun(Dir) -> filename:join(Root, Dir) end,
                          string:tokens(LibDirsStr, ",")),
   {ok, lists:filter(fun filelib:is_dir/1, LibDirs)}.
+
+%%------------------------------------------------------------------------------
+%% @doc
+%% Validate line
+%% @end
+-spec line_validate(wrq:req_data(), orddict:orddict()) ->
+                       {ok, non_neg_integer()} | error.
+%%------------------------------------------------------------------------------
+line_validate(ReqData, _Ctx) ->
+  {ok, list_to_integer(wrq:path_info(line, ReqData))}.
 
 %%------------------------------------------------------------------------------
 %% @doc
@@ -361,6 +386,30 @@ xref_checks_validate(ReqData, _Ctx) ->
         {_Legal, Illegal} -> {error, {illegal, Illegal}}
       end
   end.
+
+%%------------------------------------------------------------------------------
+%% @doc
+%% Encodes debugger replies into the appropriate json structure
+%% @end
+-spec encode_debugger_info({ok, Info :: term()}) -> term().
+%%------------------------------------------------------------------------------
+encode_debugger_info({ok, Info}) ->
+  {struct, do_encode_debugger_info(Info)};
+encode_debugger_info({error, Error}) ->
+  {struct, [{state, error}, {message, Error}]}.
+
+do_encode_debugger_info({break, File, {Module, Line}, VarBindings}) ->
+  [{state, break}, {file, list_to_binary(File)},{module, Module}, {line, Line},
+   {var_bindings,
+    {struct, encode(VarBindings)}}];
+do_encode_debugger_info([{module, _} | _] = Interpreted) ->
+  [{interpreted, {array, Interpreted}}];
+do_encode_debugger_info(State) ->
+  [{state, State}].
+
+encode(VarBindings) ->
+  [{Key, list_to_binary(io_lib:format("~p", [Value]))}
+   || {Key, Value} <- VarBindings].
 
 %%%_* Unit tests ===============================================================
 arity_validate_test() ->
