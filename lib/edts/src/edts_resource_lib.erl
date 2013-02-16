@@ -344,6 +344,8 @@ nodename_validate(ReqData, _Ctx) ->
 -spec nodename_exists_p(wrq:req_data(), orddict:orddict()) -> boolean().
 %%------------------------------------------------------------------------------
 nodename_exists_p(_ReqData, Ctx) ->
+  Node = orddict:fetch(nodename, Ctx),
+  io:format("nodename_exists_p:~p~n", [Node]),
   edts:node_reachable(orddict:fetch(nodename, Ctx)).
 
 %%------------------------------------------------------------------------------
