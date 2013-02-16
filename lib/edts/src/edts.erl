@@ -273,7 +273,7 @@ init_node(Node, ProjectRoot, LibDirs) ->
 interpret_modules(Node, Modules) ->
   case edts_dist:call(Node, edts_rett_server, interpret_modules, [Modules]) of
     {badrpc, _} -> {error, not_found};
-    Interpreted -> Interpreted
+    Interpreted -> {ok, Interpreted}
   end.
 
 %%------------------------------------------------------------------------------
