@@ -84,7 +84,7 @@ content_types_provided(ReqData, Ctx) ->
 
 malformed_request(ReqData, Ctx) ->
   %% edts_resource_lib:validate(ReqData, Ctx, [nodename, cmd, exclusions]).
-  edts_resource_lib:validate(ReqData, Ctx, [nodename, cmd]).
+  edts_resource_lib:validate(ReqData, Ctx, [nodename]).
   %% {false, ReqData, Ctx}.
 
 %% post_is_create(ReqData, Ctx) ->
@@ -101,21 +101,22 @@ process_post(ReqData, Ctx) ->
   from_json(ReqData, Ctx).
 
 from_json(ReqData, Ctx) ->
-  Node    = orddict:fetch(nodename, Ctx),
-  Command = orddict:fetch(cmd, Ctx),
-  Args    = get_args(ReqData),
+  Node        = orddict:fetch(nodename, Ctx),
+  {Cmd, Args} = retrieve_cmd_and_args(ReqData),
   io:format( "in from_json. Node:~p Command:~p Args:~p~n"
-           , [Node, Command, Args]),
-  Info    = edts:Command(Node, Args),
+           , [Node, Cmd, Args]),
+  Info        = case Args of
+                  nil -> edts:Cmd(Node);
+                  _   -> edts:Cmd(Node, Args)
+                end,
   io:format("command info:~p~n", [Info]),
   Data    = edts_resource_lib:encode_debugger_info(Info),
   {true, wrq:set_resp_body(mochijson2:encode(Data), ReqData), Ctx}.
 
-get_args(ReqData) ->
-  {struct,[{<<"args">>, Args}]} = mochijson2:decode(wrq:req_body(ReqData)),
-  lists:map(fun(Arg) ->
-                list_to_atom(binary_to_list(Arg))
-            end, Args).
+convert(Bin) when is_list(Bin)->
+  lists:map(fun convert/1, Bin);
+convert(Bin) ->
+  list_to_atom(binary_to_list(Bin)).
 
 to_json(ReqData, Ctx) ->
   Node    = orddict:fetch(nodename, Ctx),
@@ -125,6 +126,14 @@ to_json(ReqData, Ctx) ->
   {mochijson2:encode(Data), ReqData, Ctx}.
 
 %%%_* Internal functions =======================================================
+retrieve_cmd_and_args(ReqData) ->
+  do_retrieve_cmd_and_args(mochijson2:decode(wrq:req_body(ReqData))).
+
+do_retrieve_cmd_and_args({struct,[{<<"cmd">>, Cmd}, {<<"args">>, Args}]}) ->
+  {convert(Cmd), convert(Args)};
+do_retrieve_cmd_and_args({struct,[{<<"cmd">>, Cmd}]}) ->
+  {convert(Cmd), nil}.
+
 %%%_* Unit tests ===============================================================
 init_test() ->
   ?assertEqual({ok, orddict:new()}, init(foo)).
