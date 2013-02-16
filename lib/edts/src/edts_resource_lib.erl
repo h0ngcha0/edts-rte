@@ -395,9 +395,11 @@ xref_checks_validate(ReqData, _Ctx) ->
 %% @end
 -spec encode_debugger_info({ok, Info :: term()}) -> term().
 %%------------------------------------------------------------------------------
-encode_debugger_info({ok, Info}) ->
+encode_debugger_info({ok, Result, {Module, Line}}) -> %% set breakpoint
+  {struct, [{result, Result}, {module, Module}, {line, Line}]};
+encode_debugger_info({ok, Info})                   ->
   {struct, do_encode_debugger_info(Info)};
-encode_debugger_info({error, Error}) ->
+encode_debugger_info({error, Error})               ->
   {struct, [{state, error}, {message, Error}]}.
 
 do_encode_debugger_info({break, File, {Module, Line}, VarBindings}) ->

@@ -105,10 +105,7 @@ from_json(ReqData, Ctx) ->
   {Cmd, Args} = retrieve_cmd_and_args(ReqData),
   io:format( "in from_json. Node:~p Command:~p Args:~p~n"
            , [Node, Cmd, Args]),
-  Info        = case Args of
-                  nil -> edts:Cmd(Node);
-                  _   -> edts:Cmd(Node, Args)
-                end,
+  Info        = run_command(Cmd, Args, Node),
   io:format("command info:~p~n", [Info]),
   Data    = edts_resource_lib:encode_debugger_info(Info),
   {true, wrq:set_resp_body(mochijson2:encode(Data), ReqData), Ctx}.
@@ -133,6 +130,14 @@ do_retrieve_cmd_and_args({struct,[{<<"cmd">>, Cmd}, {<<"args">>, Args}]}) ->
   {convert(Cmd), convert(Args)};
 do_retrieve_cmd_and_args({struct,[{<<"cmd">>, Cmd}]}) ->
   {convert(Cmd), nil}.
+
+run_command(debugger_continue, _, Node)                       ->
+  edts:debugger_continue(Node);
+run_command(debugger_toggle_breakpoint, [Module, Line], Node) ->
+  edts:debugger_toggle_breakpoint( Node, Module
+                                 , list_to_integer(atom_to_list(Line)));
+run_command(debugger_interpret_modules, Modules, Node) ->
+  edts:interpret_modules(Node, Modules).
 
 %%%_* Unit tests ===============================================================
 init_test() ->
