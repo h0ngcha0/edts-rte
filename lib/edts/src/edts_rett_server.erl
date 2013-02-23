@@ -83,7 +83,7 @@ stop() ->
                                   | {already_attached, pid(), pid()}.
 %%------------------------------------------------------------------------------
 maybe_attach(Pid) ->
-  io:format("in maybe_attach, Pid:~p~n", [Pid]),
+  edts_log:info("in maybe_attach, Pid:~p~n", [Pid]),
   case gen_server:call(?SERVER, {attach, Pid}) of
     {ok, attach, AttPid} ->
       {attached, AttPid, Pid};
@@ -264,13 +264,13 @@ init([]) ->
                      {stop, Reason::atom(), state()}.
 %%------------------------------------------------------------------------------
 handle_call({attach, Pid}, _From, #dbg_state{proc = unattached} = State) ->
-  io:format("in hancle_call, attach, Pid:~p~n", [Pid]),
+  edts_log:info("in hancle_call, attach, Pid:~p", [Pid]),
   register_attached(self()),
   int:attached(Pid),
   error_logger:info_msg("Debugger ~p attached to ~p~n", [self(), Pid]),
   {reply, {ok, attach, self()}, State#dbg_state{proc = Pid}};
 handle_call({attach, Pid}, _From, #dbg_state{debugger=Dbg, proc=Pid} = State) ->
-  io:format("in hancle_call, already attach, Pid:~p~n", [Pid]),
+  edts_log:info("in hancle_call, already attach, Pid:~p", [Pid]),
   {reply, {error, {already_attached, Dbg, Pid}}, State};
 
 handle_call({interpret, Modules}, _From, State) ->
@@ -319,7 +319,9 @@ handle_call(_Cmd, _From, #dbg_state{proc = unattached} = State) ->
   {reply, {error, unattached}, State};
 
 handle_call(continue, From, #dbg_state{proc = Pid} = State) ->
+  edts_log:info("before int:continue"),
   int:continue(Pid),
+  edts_log:info("after int:continue. pid~p", [Pid]),
   Listeners = State#dbg_state.listeners,
   {noreply, State#dbg_state{listeners = [From|Listeners]}};
 
@@ -367,16 +369,17 @@ handle_cast(_Msg, State) ->
 %% Hit a breakpoint
 handle_info({Meta, {break_at, Module, Line, _Cur}}, State) ->
   Bindings = int:meta(Meta, bindings, nostack),
-  io:format("in handle_info, break_at, Bindings:~p~n", [Bindings]),
-  io:format("in handle_info, break_at, Module:~p, Line:~p~n", [Module, Line]),
+  edts_log:info("in handle_info, break_at, Bindings:~p", [Bindings]),
+  edts_log:info("in handle_info, break_at, Module:~p, Line:~p", [Module, Line]),
   File = int:file(Module),
   notify({break, File, {Module, Line}, Bindings}),
   {noreply, State};
 
 %% Became idle (not executing any code under debugging)
-handle_info({Meta, idle}, State) ->
-  Bindings = int:meta(Meta, bindings, nostack),
-  io:format("in handle_info, idle, Bindings:~p~n", [Bindings]),
+handle_info({_Meta, idle}, State) ->
+  edts_log:info("in handle_info, idle"),
+  %% Crap, why this can't be executed?
+  %% Bindings = int:meta(Meta, bindings, nostack),
   notify(idle),
   {noreply, State};
 
@@ -395,7 +398,7 @@ handle_info({_Meta, {attached, _, _, _}}, State) ->
 %% Process under debug terminated
 handle_info({Meta, {exit_at, _, _Reason, _}}, State) ->
   Bindings = int:meta(Meta, bindings, nostack),
-  io:format("in handle_info, exit_at, Bindings:~p~n", [Bindings]),
+  edts_log:info("in handle_info, exit_at, Bindings:~p", [Bindings]),
   {noreply, State};
 
 handle_info(Msg, State) ->

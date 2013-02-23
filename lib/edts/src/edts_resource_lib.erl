@@ -406,6 +406,9 @@ do_encode_debugger_info({break, File, {Module, Line}, VarBindings}) ->
   [{state, break}, {file, list_to_binary(File)},{module, Module}, {line, Line},
    {var_bindings,
     {struct, encode(VarBindings)}}];
+do_encode_debugger_info({run_value, Value}) ->
+  ValueB = list_to_binary(lists:flatten(io_lib:format("~p", [Value]))),
+  [{run_value, ValueB}];
 do_encode_debugger_info([{module, _} | _] = Interpreted) ->
   [{interpreted, {array, Interpreted}}];
 do_encode_debugger_info(State) ->
