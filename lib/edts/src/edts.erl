@@ -44,6 +44,7 @@
          modules/1,
          node_reachable/1,
          nodes/0,
+         run_fun/4,
          who_calls/4]).
 
 %%%_* Includes =================================================================
@@ -308,7 +309,6 @@ node_available_p(Node) ->
 modules(Node) ->
   edts_dist:call(Node, edts_code, modules).
 
-
 %%------------------------------------------------------------------------------
 %% @doc
 %% Returns true if Node is registerend with the epmd on localhost.
@@ -329,6 +329,11 @@ node_reachable(Node) ->
 %%------------------------------------------------------------------------------
 nodes() ->
   edts_server:nodes().
+
+-spec run_fun(Node::node(), Mod::module(), Fun::function(), Args::[any()]) ->
+                 {ok, any()}.
+run_fun(Node, Mod, Fun, Args) ->
+  {ok, {run_value, edts_dist:call(Node, Mod, Fun, Args)}}.
 
 %%%_* Internal functions =======================================================
 
