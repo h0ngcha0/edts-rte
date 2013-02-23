@@ -110,10 +110,35 @@ from_json(ReqData, Ctx) ->
   Data    = edts_resource_lib:encode_debugger_info(Info),
   {true, wrq:set_resp_body(mochijson2:encode(Data), ReqData), Ctx}.
 
-convert(Bin) when is_list(Bin)->
-  lists:map(fun convert/1, Bin);
-convert(Bin) ->
+to_atom(Bin) when is_list(Bin)->
+  lists:map(fun to_atom/1, Bin);
+to_atom(Bin) ->
   list_to_atom(binary_to_list(Bin)).
+
+mk_convert_fun(debugger_toggle_breakpoint) ->
+  fun (Args) ->
+      [Module, Line] = Args,
+      [to_atom(Module), to_atom(Line)]
+  end;
+mk_convert_fun(debugger_interpret_modules) ->
+  fun (Modules) ->
+      lists:map(fun to_atom/1, Modules)
+  end;
+mk_convert_fun(run_function)               ->
+  fun (Args) ->
+      [Module, Fun, ArgumentsB] = Args,
+      [to_atom(Module), to_atom(Fun), to_term(ArgumentsB)]
+  end.
+
+to_term(ArgumentsB) ->
+  Arguments = binary_to_list(ArgumentsB),
+  %% N.B. this is very hackish. added a '.' because
+  %%      erl_scan:string/1 requires full expression with dot
+  {ok, Tokens,__Endline} = erl_scan:string(Arguments++"."),
+  {ok, AbsForm}          = erl_parse:parse_exprs(Tokens),
+  {value, Value,_Bs}     = erl_eval:exprs( AbsForm
+                                         , erl_eval:new_bindings()),
+  Value.
 
 to_json(ReqData, Ctx) ->
   Node    = orddict:fetch(nodename, Ctx),
@@ -127,17 +152,22 @@ retrieve_cmd_and_args(ReqData) ->
   do_retrieve_cmd_and_args(mochijson2:decode(wrq:req_body(ReqData))).
 
 do_retrieve_cmd_and_args({struct,[{<<"cmd">>, Cmd}, {<<"args">>, Args}]}) ->
-  {convert(Cmd), convert(Args)};
+  Command    = to_atom(Cmd),
+  ConvertFun = mk_convert_fun(Command),
+  {Command, ConvertFun(Args)};
 do_retrieve_cmd_and_args({struct,[{<<"cmd">>, Cmd}]}) ->
-  {convert(Cmd), nil}.
+  {to_atom(Cmd), nil}.
 
 run_command(debugger_continue, _, Node)                       ->
   edts:debugger_continue(Node);
 run_command(debugger_toggle_breakpoint, [Module, Line], Node) ->
   edts:debugger_toggle_breakpoint( Node, Module
                                  , list_to_integer(atom_to_list(Line)));
-run_command(debugger_interpret_modules, Modules, Node) ->
-  edts:interpret_modules(Node, Modules).
+run_command(debugger_interpret_modules, Modules, Node)        ->
+  edts:interpret_modules(Node, Modules);
+run_command(run_function, [Module, Fun, Args], Node)          ->
+  ct:pal("Mod:~p, Fun:~p, Args:~p", [Module, Fun, Args]),
+  edts:run_fun(Node, Module, Fun, Args).
 
 %%%_* Unit tests ===============================================================
 init_test() ->
