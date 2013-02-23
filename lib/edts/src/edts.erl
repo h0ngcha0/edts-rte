@@ -30,6 +30,7 @@
 %% API
 -export([compile_and_load/2,
          debugger_continue/1,
+         debugger_set_breakpoint/4,
          debugger_toggle_breakpoint/3,
          get_breakpoints/1,
          get_dialyzer_result/4,
@@ -87,6 +88,26 @@ debugger_continue(Node) ->
     {badrpc, _} -> {error, not_found};
     Result      -> Result
   end.
+
+%%------------------------------------------------------------------------------
+%% @doc
+%% Set a breakpoint in Module:Function/Arity
+%% @end
+-spec debugger_set_breakpoint( Node     :: node()
+                             , Module   :: module()
+                             , Function :: function()
+                             , Arity    :: non_neg_integer())
+                             -> {ok, set, tuple()} |
+                                {error, function_not_found} |
+                                {error, not_found}.
+%%------------------------------------------------------------------------------
+debugger_set_breakpoint(Node, Module, Function, Arity) ->
+  Args = [Module,Function, Arity],
+  case edts_dist:call(Node, edts_rett_server, set_breakpoint, Args) of
+    {badrpc, _} -> {error, not_found};
+    Result      -> Result
+  end.
+
 
 %%------------------------------------------------------------------------------
 %% @doc
