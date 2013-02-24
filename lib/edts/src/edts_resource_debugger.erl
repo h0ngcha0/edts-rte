@@ -166,6 +166,9 @@ do_retrieve_cmd_and_args({struct,[{<<"cmd">>, Cmd}, {<<"args">>, Args}]}) ->
 do_retrieve_cmd_and_args({struct,[{<<"cmd">>, Cmd}]}) ->
   {to_atom(Cmd), nil}.
 
+
+run_command(rte_run, [Module, Fun, Args], Node)                 ->
+  edts:rte_run(Node, Module, Fun, Args);
 run_command(debugger_continue, _, Node)                          ->
   edts:debugger_continue(Node);
 run_command(debugger_set_breakpoint, [Module, Fun, Arity], Node) ->
