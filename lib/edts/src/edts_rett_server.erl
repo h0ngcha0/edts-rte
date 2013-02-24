@@ -36,6 +36,7 @@
         , is_module_interpreted/1
         , maybe_attach/1
         , set_breakpoint/3
+        , set_rte_flag/0
         , started_p/0
         , step/0
         , step_out/0
@@ -43,7 +44,7 @@
         , toggle_breakpoint/2
         , uninterpret_modules/1
         , uninterpret_node/0
-        , wait_for_debugger/0 ]).
+        , wait_for_debugger/0]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
@@ -60,7 +61,8 @@
           proc = unattached      :: unattached | pid(),
           stack = {1, 1}         :: {non_neg_integer(), non_neg_integer()},
           listeners = []         :: [term()],
-          interpretation = false :: boolean()
+          interpretation = false :: boolean(),
+          is_rte = false         :: boolean()
          }).
 
 %%%_* Types ====================================================================
@@ -134,6 +136,15 @@ interpret_node(Exclusions) ->
 %%------------------------------------------------------------------------------
 is_node_interpreted() ->
   gen_server:call(?SERVER, is_node_interpreted).
+
+%%------------------------------------------------------------------------------
+%% @doc
+%% Set the rte flag to true
+%% @end
+-spec set_rte_flag() -> boolean().
+%%------------------------------------------------------------------------------
+set_rte_flag() ->
+  gen_server:call(?SERVER, set_rte_flag).
 
 %%------------------------------------------------------------------------------
 %% @doc
@@ -274,11 +285,15 @@ init([]) ->
                      {stop, Reason::atom(), term(), state()} |
                      {stop, Reason::atom(), state()}.
 %%------------------------------------------------------------------------------
-handle_call({attach, Pid}, _From, #dbg_state{proc = unattached} = State) ->
-  io:format("in hancle_call, attach, Pid:~p~n", [Pid]),
-  register_attached(self()),
-  int:attached(Pid),
-  error_logger:info_msg("Debugger ~p attached to ~p~n", [self(), Pid]),
+handle_call({attach, Pid}, _From, #dbg_state{ proc = unattached
+                                            , is_rte = false} = State) ->
+  ok = do_attach_pid(Pid, State),
+  {reply, {ok, attach, self()}, State#dbg_state{proc = Pid}};
+handle_call({attach, Pid}, _From, #dbg_state{ proc = unattached
+                                            , is_rte = true} = State) ->
+  ok = do_attach_pid(Pid, State),
+  %% step thru...
+  edts_rte_server:finished_attach(Pid),
   {reply, {ok, attach, self()}, State#dbg_state{proc = Pid}};
 handle_call({attach, Pid}, _From, #dbg_state{debugger=Dbg, proc=Pid} = State) ->
   io:format("in hancle_call, already attach, Pid:~p~n", [Pid]),
@@ -334,6 +349,9 @@ handle_call(wait_for_debugger, From, State) ->
   Listeners = State#dbg_state.listeners,
   {noreply, State#dbg_state{listeners = [From|Listeners]}};
 
+handle_call(set_rte_flag, _From, State) ->
+  {reply, ok, State#dbg_state{is_rte = true}};
+
 handle_call(_Cmd, _From, #dbg_state{proc = unattached} = State) ->
   {reply, {error, unattached}, State};
 
@@ -357,7 +375,6 @@ handle_call(step_out, From, #dbg_state{proc = Pid} = State) ->
 handle_call(stop_debug, _From, #dbg_state{proc = Pid}) ->
   exit(Pid, kill),
   {reply, {ok, finished}, #dbg_state{}}.
-
 
 %%------------------------------------------------------------------------------
 %% @private
@@ -388,10 +405,12 @@ handle_cast(_Msg, State) ->
 %% Hit a breakpoint
 handle_info({Meta, {break_at, Module, Line, _Cur}}, State) ->
   Bindings = int:meta(Meta, bindings, nostack),
-  io:format("in handle_info, break_at, Bindings:~p~n", [Bindings]),
-  io:format("in handle_info, break_at, Module:~p, Line:~p~n", [Module, Line]),
   File = int:file(Module),
   notify({break, File, {Module, Line}, Bindings}),
+  case State#dbg_state.is_rte of
+    true  -> edts_rte_server:send_binding({break_at, Bindings});
+    false -> do_nothing
+  end,
   {noreply, State};
 
 %% Became idle (not executing any code under debugging)
@@ -417,8 +436,10 @@ handle_info({_Meta, {attached, _, _, _}}, State) ->
 %% Process under debug terminated
 handle_info({Meta, {exit_at, _, _Reason, _}}, State) ->
   Bindings = int:meta(Meta, bindings, nostack),
-  io:format("in handle_info, exit_at, Bindings:~p~n", [Bindings]),
-  {noreply, State};
+  io:format("in handle_info, till exit_at, Bindings:~p~n", [Bindings]),
+  edts_rte_server:send_exit(),
+  io:format("exit signal sent~n"),
+  {noreply, State#dbg_state{proc = unattached, is_rte=false}};
 
 handle_info(Msg, State) ->
   error_logger:info_msg("Unexpected message: ~p~n", [Msg]),
@@ -452,6 +473,12 @@ code_change(_OldVsn, State, _Extra) ->
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
+do_attach_pid(Pid, State) ->
+  io:format("in hancle_call, attach, Pid:~p~n", [Pid]),
+  register_attached(self()),
+  int:attached(Pid),
+  error_logger:info_msg("Debugger ~p attached to ~p~n", [self(), Pid]),
+  ok.
 
 %%------------------------------------------------------------------------------
 %% @doc
