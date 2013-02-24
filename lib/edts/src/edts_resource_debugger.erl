@@ -115,19 +115,27 @@ to_atom(Bin) when is_list(Bin)->
 to_atom(Bin) ->
   list_to_atom(binary_to_list(Bin)).
 
+to_integer(Bin) ->
+  list_to_integer(binary_to_list(Bin)).
+
+mk_convert_fun(debugger_set_breakpoint)    ->
+  fun (Args) ->
+      [Module, Fun, Arity] = Args,
+      [to_atom(Module), to_atom(Fun), to_integer(Arity)]
+  end;
 mk_convert_fun(debugger_toggle_breakpoint) ->
   fun (Args) ->
       [Module, Line] = Args,
-      [to_atom(Module), to_atom(Line)]
-  end;
-mk_convert_fun(debugger_interpret_modules) ->
-  fun (Modules) ->
-      lists:map(fun to_atom/1, Modules)
+      [to_atom(Module), to_integer(Line)]
   end;
 mk_convert_fun(run_function)               ->
   fun (Args) ->
       [Module, Fun, ArgumentsB] = Args,
       [to_atom(Module), to_atom(Fun), to_term(ArgumentsB)]
+  end;
+mk_convert_fun(_)                          ->
+  fun (Modules) ->
+      lists:map(fun to_atom/1, Modules)
   end.
 
 to_term(ArgumentsB) ->
@@ -158,14 +166,15 @@ do_retrieve_cmd_and_args({struct,[{<<"cmd">>, Cmd}, {<<"args">>, Args}]}) ->
 do_retrieve_cmd_and_args({struct,[{<<"cmd">>, Cmd}]}) ->
   {to_atom(Cmd), nil}.
 
-run_command(debugger_continue, _, Node)                       ->
+run_command(debugger_continue, _, Node)                          ->
   edts:debugger_continue(Node);
-run_command(debugger_toggle_breakpoint, [Module, Line], Node) ->
-  edts:debugger_toggle_breakpoint( Node, Module
-                                 , list_to_integer(atom_to_list(Line)));
-run_command(debugger_interpret_modules, Modules, Node)        ->
+run_command(debugger_set_breakpoint, [Module, Fun, Arity], Node) ->
+  edts:debugger_set_breakpoint(Node, Module, Fun, Arity);
+run_command(debugger_toggle_breakpoint, [Module, Line], Node)    ->
+  edts:debugger_toggle_breakpoint(Node, Module, Line);
+run_command(debugger_interpret_modules, Modules, Node)           ->
   edts:interpret_modules(Node, Modules);
-run_command(run_function, [Module, Fun, Args], Node)          ->
+run_command(run_function, [Module, Fun, Args], Node)             ->
   ct:pal("Mod:~p, Fun:~p, Args:~p", [Module, Fun, Args]),
   edts:run_fun(Node, Module, Fun, Args).
 
