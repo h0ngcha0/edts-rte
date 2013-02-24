@@ -45,6 +45,7 @@
          modules/1,
          node_reachable/1,
          nodes/0,
+         rte_run/4,
          run_fun/4,
          who_calls/4]).
 
@@ -141,6 +142,25 @@ debugger_toggle_breakpoint(Node, Module, Line) ->
 %%------------------------------------------------------------------------------
 get_breakpoints(Node) ->
   case edts_dist:call(Node, edts_rett_server, get_breakpoints, []) of
+    {badrpc, _} -> {error, not_found};
+    Result      -> Result
+  end.
+
+%%------------------------------------------------------------------------------
+%% @doc
+%% Run function
+%% @end
+%%
+-spec rte_run(Node :: node(), 
+              Module  :: module(),
+              Fun :: function(),
+              Args :: list(any())) ->
+                 any().
+
+%%------------------------------------------------------------------------------
+rte_run(Node, Module, Fun, Args) ->
+
+  case edts_dist:call(Node, edts_rte_server, rte_run, [Module, Fun, Args]) of
     {badrpc, _} -> {error, not_found};
     Result      -> Result
   end.
