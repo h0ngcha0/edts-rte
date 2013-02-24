@@ -181,10 +181,12 @@ compile_and_load(File0, Opts) ->
 get_function_info(M, F, A) ->
   reload_module(M),
   {M, Bin, _File}                   = code:get_object_code(M),
+  io:format("M:~p~nBin:~p~n_File:~p~n", [M, Bin,_File]),
   {ok, {M, Chunks}}                 = beam_lib:chunks(Bin, [abstract_code]),
   {abstract_code, {_Vsn, Abstract}} = lists:keyfind(abstract_code, 1, Chunks),
   ExportedP = lists:member({F, A}, M:module_info(exports)),
   {ok, ModSrc} = get_module_source(M, M:module_info()),
+  io:format("ModSrc:~p~n", [ModSrc]),
   case get_file_and_line(M, F, A, ModSrc, Abstract) of
     {error, _} = Err   ->
       case ExportedP of
@@ -556,6 +558,9 @@ get_file_and_line(M, new, A, CurFile,
   when length(Attrs) =:= A ->
   {ok, {CurFile, Line}};
 get_file_and_line(_M, F, A, CurFile, [{function, Line, F, A, _Clauses}|_T]) ->
+  io:format("get_file_and_file:~p~n", [{function, Line, F, A, _Clauses}]),
+  %% io:format(lists:flatten(erl_pp:form({function, Line, F, A, _Clauses}))).
+  %% will give us the string representation of the function
   {ok, {CurFile, Line}};
 get_file_and_line(M, F, A, _CurFile, [{attribute, _, file, {File, _}}|T]) ->
   get_file_and_line(M, F, A, File, T);
