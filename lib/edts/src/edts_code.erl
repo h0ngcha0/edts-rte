@@ -35,6 +35,7 @@
          compile_and_load/1,
          free_vars/1,
          free_vars/2,
+         get_function_body/3,
          get_function_info/3,
          get_module_info/1,
          get_module_info/2,
@@ -559,15 +560,48 @@ get_file_and_line(M, new, A, CurFile,
   {ok, {CurFile, Line}};
 get_file_and_line(_M, F, A, CurFile, [{function, Line, F, A, _Clauses}|_T]) ->
   io:format("get_file_and_file:~p~n", [{function, Line, F, A, _Clauses}]),
-  %% io:format(lists:flatten(erl_pp:form({function, Line, F, A, _Clauses}))).
+  %%io:format(lists:flatten(erl_pp:form({function, Line, F, A, _Clauses}))),
   %% will give us the string representation of the function
-  {ok, {CurFile, Line}};
+  %%FunctionBody = lists:flatten(erl_pp:form({function, Line, F, A, _Clauses})),
+  {ok, {CurFile,  Line}};
 get_file_and_line(M, F, A, _CurFile, [{attribute, _, file, {File, _}}|T]) ->
   get_file_and_line(M, F, A, File, T);
 get_file_and_line(M, F, A, CurFile, [_H|T]) ->
   get_file_and_line(M, F, A, CurFile, T);
 get_file_and_line(_M, _F, _A, _CurFile, []) ->
   {error, not_found}.
+
+get_function_body(M, F, A) ->
+  reload_module(M),
+  {M, Bin, _File}                   = code:get_object_code(M),
+  {ok, {M, Chunks}}                 = beam_lib:chunks(Bin, [abstract_code]),
+  {abstract_code, {_Vsn, Abstract}} = lists:keyfind(abstract_code, 1, Chunks),
+  ExportedP = lists:member({F, A}, M:module_info(exports)),
+  {ok, ModSrc} = get_module_source(M, M:module_info()),
+  case get_function(M, F, A, ModSrc, Abstract) of
+    {error, _} = Err   ->
+      Err;
+    {ok, FunBody} ->
+      FunBody
+  end.
+
+get_function(M, new, A, CurFile,
+                  [{attribute, Line, module, {M, Attrs}}|_T])
+  when length(Attrs) =:= A ->
+  {ok, {CurFile, Line}};
+get_function(_M, F, A, CurFile, [{function, Line, F, A, _Clauses}|_T]) ->
+  io:format("get_file_and_file:~p~n", [{function, Line, F, A, _Clauses}]),
+  %% will give us the string representation of the function
+  FunctionBody = lists:flatten(erl_pp:form({function, Line, F, A, _Clauses})),
+  {ok, FunctionBody};
+get_function(M, F, A, _CurFile, [{attribute, _, file, {File, _}}|T]) ->
+  get_function(M, F, A, File, T);
+get_function(M, F, A, CurFile, [_H|T]) ->
+  get_function(M, F, A, CurFile, T);
+get_function(_M, _F, _A, _CurFile, []) ->
+  {error, not_found}.
+               
+
 
 %%------------------------------------------------------------------------------
 %% @doc Parse abstract code into a module information substract.
