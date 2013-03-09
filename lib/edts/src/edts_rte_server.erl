@@ -1,0 +1,278 @@
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%% @doc%%%
+%%% This file is part of EDTS.
+%%%
+%%% EDTS is free software: you can redistribute it and/or modify
+%%% it under the terms of the GNU Lesser General Public License as published by
+%%% the Free Software Foundation, either version 3 of the License, or
+%%% (at your option) any later version.
+%%%
+%%% EDTS is distributed in the hope that it will be useful,
+%%% but WITHOUT ANY WARRANTY; without even the implied warranty of
+%%% MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+%%% GNU Lesser General Public License for more details.
+%%%
+%%% You should have received a copy of the GNU Lesser General Public License
+%%% along with EDTS. If not, see <http://www.gnu.org/licenses/>.
+%%% @end
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+%%%_* Module declaration =======================================================
+-module(edts_rte_server).
+
+-behaviour(gen_server).
+
+%%%_* Exports =================================================================
+
+%% server API
+-export([start/0, stop/0, start_link/0]).
+
+-export([started_p/0]).
+
+%% Debugger API
+-export([ rte_run/3
+        , finished_attach/1
+        , send_binding/1
+        , send_exit/0
+        ]).
+
+%% gen_server callbacks
+-export([init/1, handle_call/3, handle_cast/2, handle_info/2,
+         terminate/2, code_change/3]).
+
+%%%_* Includes =================================================================
+-include_lib("eunit/include/eunit.hrl").
+
+%%%_* Defines ==================================================================
+-define(SERVER, ?MODULE).
+-record(dbg_state, {
+          proc     = unattached :: unattached | pid(),
+          bindings = []         :: [{atom(), any()}],
+          mfa = empty  :: {} | tuple()
+         }).
+
+%%%_* Types ====================================================================
+-type state():: #dbg_state{}.
+
+%%%_* API ======================================================================
+start() ->
+  ?MODULE:start_link(),
+  {node(), ok}.
+
+stop() ->
+  ok.
+
+started_p() -> whereis(?SERVER) =/= undefined.
+
+%%------------------------------------------------------------------------------
+%% @doc
+%% Starts the server
+%% @end
+%%
+-spec start_link() -> {ok, pid()} | ignore | {error, term()}.
+%%-----------------------------------------------------------------------------
+start_link() ->
+  gen_server:start_link({local, ?SERVER}, ?MODULE, [], []).
+
+%%------------------------------------------------------------------------------
+%% @doc
+%% Run function
+%% @end
+-spec rte_run(Module::module(), Fun::function(), Args::list()) -> any().
+%%------------------------------------------------------------------------------
+rte_run(Module, Fun, Args) ->
+  gen_server:call(?SERVER, {rte_run, Module, Fun, Args}).
+
+finished_attach(Pid) ->
+  gen_server:cast(?SERVER, {finished_attach, Pid}).
+
+send_binding(Msg) ->
+  gen_server:cast(?SERVER, {send_binding, Msg}).
+
+send_exit() ->
+  gen_server:cast(?SERVER, send_exit).
+
+%%%_* gen_server callbacks  ====================================================
+%%------------------------------------------------------------------------------
+%% @private
+%% @doc
+%% Initializes the server
+%% @end
+-spec init(list()) -> {ok, state()} |
+                      {ok, state(), timeout()} |
+                      ignore |
+                      {stop, atom()}.
+%%------------------------------------------------------------------------------
+init([]) ->
+  {ok, #dbg_state{}}.
+
+handle_call({rte_run, Module, Fun, Args}, _From, State) ->
+  ok       = edts_rett_server:set_rte_flag(),
+  [Module] = edts_rett_server:interpret_modules([Module]),
+  Arity    = length(Args),
+  io:format("get function body after interpret~n"),
+  {ok, set, {Module, Fun, Arity}} =  edts_rett_server:set_breakpoint(Module, Fun, Arity),
+  io:format("rte_run: after setbreakpoint~n"),
+  Pid      = erlang:spawn(Module, Fun, Args),
+  io:format("called function pid:~p~n", [Pid]),
+  {reply, {ok, finished}, State#dbg_state{ proc = Pid
+                                         , bindings = []
+                                         , mfa = {Module, Fun, Arity}}}.
+
+%%------------------------------------------------------------------------------
+%% @private
+%% @doc Handling all non call/cast messages
+%% @end
+%%
+-spec handle_info(term(), state()) -> {noreply, state()} |
+                                      {noreply, state(), Timeout::timeout()} |
+                                      {stop, Reason::atom(), state()}.
+handle_info(Msg, State) ->
+  io:format("in handle_info ...., break_at, Msg:~p~n", [Msg]),
+  {noreply, State}.
+
+%%------------------------------------------------------------------------------
+%% @private
+%% @doc
+%% Handling cast messages
+%% @end
+-spec handle_cast(Msg::term(), state()) -> {noreply, state()} |
+                                           {noreply, state(), timeout()} |
+                                           {stop, Reason::atom(), state()}.
+%%------------------------------------------------------------------------------
+handle_cast({finished_attach, Pid}, State) ->
+  Pid = State#dbg_state.proc,
+  edts_rett_server:step(),
+  io:format("finish attach.....~n"),
+  {noreply, State};
+
+handle_cast({send_binding, {break_at, Bindings}}, State) ->
+  Pid = State#dbg_state.proc,
+  io:format("send_binding......before step~n"),
+  edts_rett_server:step(),
+  io:format("send_binding......Bindings:~p~n",[Bindings]),
+  {noreply, State#dbg_state{bindings = Bindings}};
+
+handle_cast(send_exit, #dbg_state{bindings = Bindings} = State) ->
+  %%io:format("in send_exit, Bindings:~p~n", [Bindings]),
+  %% get function body
+  {M, F, A} = State#dbg_state.mfa,
+  Body = edts_code:get_function_body(M, F, A),
+  io:format( "output FunBody, Bindings before replace:~n"++Body++"~n"),
+  io:format( "Bindings:~n~p~n"
+           , [Bindings]),
+  %% replace function body with bindings
+  ReplacedFun = replace_fun_body_with_bingding(Body, Bindings),
+  io:format( "output funbody after replacement:~n"++ReplacedFun++"~n"),
+  {noreply, State};
+handle_cast(_Msg, State) ->
+  {noreply, State}.
+
+replace_fun_body_with_bingding(FunBody, Bindings) ->
+    %% Parse function body to AbsForm
+    case erl_scan:string(FunBody) of
+      {ok,FunBodyToken, _} -> FunBodyToken;
+        _ -> io:format("Error happens in scaning function body"),
+             FunBodyToken = {}
+    end,
+
+    case erl_parse:parse_form(FunBodyToken) of
+      {ok, AbsForm} -> AbsForm,
+                       %%io:format("Function AbsForm: ~p~n", [AbsForm]),
+                       %% Replace variable names with variables' value and combine the Token to function string again
+                       NewFunBody = replace_variablename_with_value_function(AbsForm, Bindings),
+                       io:format("New Body before flatten: ~p~n", [NewFunBody]),
+                       NewForm = erl_pp:form(NewFunBody),
+                       io:format("New Form before flatten: ~p~n", [NewForm]),
+                       lists:flatten(NewForm);
+      _ -> io:format("Error happens in parsing to Abs form")
+    end.
+
+replace_variablename_with_value_function({function, L, FuncName, Arity, Clauses}, Bindings) ->
+  io:format("Clause is:~p~n", [Clauses]),
+  {function, L, FuncName, Arity, replace_variablename_with_value_clauses(Clauses, Bindings)}.
+
+replace_variablename_with_value_clauses([], Bindings) ->[];
+replace_variablename_with_value_clauses([{clause,L,ArgList0,[],Lines0}|T], Bindings) ->
+    %% replace variables' name with values in argument list
+    ArgList = replace_variablename_with_value_arguments(ArgList0, Bindings),
+    %% replace variables' name with values for each function line
+    Lines = replace_variablename_with_value_statements(Lines0, Bindings),
+    [{clause,L,ArgList,[],Lines} | replace_variablename_with_value_clauses(T, Bindings)].
+
+replace_variablename_with_value_arguments([], Bindings)->[];
+replace_variablename_with_value_arguments([VarExpr0|T], Bindings) ->
+  VarExpr = replace_variablename_with_value(VarExpr0, Bindings),
+  [VarExpr | replace_variablename_with_value_arguments(T, Bindings)].
+
+replace_variablename_with_value_statements([], Bindings) -> [];
+replace_variablename_with_value_statements({nil, Var}, Bindings) -> {nil, Var};
+replace_variablename_with_value_statements({match,L,LExpr0,RExpr0}, Bindings) -> 
+    LExpr = replace_variablename_with_value_operations(LExpr0, Bindings),
+    RExpr = replace_variablename_with_value_operations(RExpr0, Bindings),
+    {match,L,LExpr,RExpr};
+replace_variablename_with_value_statements({var, _, _} = VarExpr, Bindings) ->
+    replace_variablename_with_value(VarExpr, Bindings);
+replace_variablename_with_value_statements([Statement0|T], Bindings) -> 
+    Statement = replace_variablename_with_value_statements(Statement0, Bindings),
+    [Statement | replace_variablename_with_value_statements(T, Bindings)].
+
+replace_variablename_with_value_operations({integer, _, _} = VarExpr, Bindings) ->
+    replace_variablename_with_value(VarExpr, Bindings);
+replace_variablename_with_value_operations({var, _, _} = VarExpr, Bindings) ->
+    replace_variablename_with_value(VarExpr, Bindings);
+replace_variablename_with_value_operations({op, L, '+', LExpr0, RExpr0}, Bindings)->
+    LExpr = replace_variablename_with_value_operations(LExpr0, Bindings),
+    RExpr = replace_variablename_with_value_operations(RExpr0, Bindings),
+    {op, L, '+', LExpr, RExpr};
+replace_variablename_with_value_operations({op, L, '-', LExpr0, RExpr0}, Bindings)->
+    LExpr = replace_variablename_with_value_operations(LExpr0, Bindings),
+    RExpr = replace_variablename_with_value_operations(RExpr0, Bindings),
+    {op, L, '-', LExpr, RExpr};
+replace_variablename_with_value_operations({op, L, '*', LExpr0, RExpr0}, Bindings)->
+    LExpr = replace_variablename_with_value_operations(LExpr0, Bindings),
+    RExpr = replace_variablename_with_value_operations(RExpr0, Bindings),
+    {op, L, '*', LExpr, RExpr};
+replace_variablename_with_value_operations({op, L, '/', LExpr0, RExpr0}, Bindings)->
+    LExpr = replace_variablename_with_value_operations(LExpr0, Bindings),
+    RExpr = replace_variablename_with_value_operations(RExpr0, Bindings),
+    {op, L, '/', LExpr, RExpr};
+replace_variablename_with_value_operations({call, L, {atom, L, F}, ArgList0}, Bindings) ->
+    {call, L, {atom, L, F}, replace_variablename_with_value_arguments(ArgList0, Bindings)}.
+
+replace_variablename_with_value({var, L, VariableName}, Bindings) ->
+    Value = proplists:get_value(VariableName, Bindings),
+    {var, L, Value};
+replace_variablename_with_value(OtherStruct, Bindings) ->
+    OtherStruct.
+  
+%%------------------------------------------------------------------------------
+%% @private
+%% @doc
+%% This function is called by a gen_server when it is about to
+%% terminate. It should be the opposite of Module:init/1 and do any
+%% necessary cleaning up. When it returns, the gen_server terminates
+%% with Reason. The return value is ignored.
+%% @end
+-spec terminate(Reason::atom(), _State :: state()) -> any().
+%%------------------------------------------------------------------------------
+terminate(_Reason, _State) ->
+  ok.
+
+%%------------------------------------------------------------------------------
+%% @private
+%% @doc
+%% Convert process state when code is changed
+%%
+-spec code_change(OldVsn::string(), state(), Extra::term()) -> {ok, state()}.
+%%------------------------------------------------------------------------------
+code_change(_OldVsn, State, _Extra) ->
+  {ok, State}.
+
+%%%_* Unit tests ===============================================================
+
+%%%_* Emacs ====================================================================
+%%% Local Variables:
+%%% allout-layout: t
+%%% erlang-indent-level: 2
+%%% End:
