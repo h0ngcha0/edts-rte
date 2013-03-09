@@ -229,48 +229,56 @@ replace_var_with_val_args([VarExpr0|T], Bindings) ->
   VarExpr = replace_var_with_val(VarExpr0, Bindings),
   [VarExpr | replace_var_with_val_args(T, Bindings)].
 
-replace_var_with_val_in_expr([], _Bindings)                     ->
+replace_var_with_val_in_expr([], _Bindings)                               ->
   [];
-replace_var_with_val_in_expr({nil, Var}, _Bindings)             ->
+replace_var_with_val_in_expr({nil, Var}, _Bindings)                       ->
   {nil, Var};
-replace_var_with_val_in_expr({match,L,LExpr0,RExpr0}, Bindings) ->
-  LExpr = replace_var_with_val_ops(LExpr0, Bindings),
-  RExpr = replace_var_with_val_ops(RExpr0, Bindings),
-  {match,L,LExpr,RExpr};
-replace_var_with_val_in_expr({var, _, _} = VarExpr, Bindings)   ->
+replace_var_with_val_in_expr({float, _, _} = VarExpr, Bindings)           ->
   replace_var_with_val(VarExpr, Bindings);
-replace_var_with_val_in_expr([Statement0|T], Bindings)          ->
+replace_var_with_val_in_expr({integer, _, _} = VarExpr, Bindings)         ->
+  replace_var_with_val(VarExpr, Bindings);
+replace_var_with_val_in_expr({match,L,LExpr0,RExpr0}, Bindings)           ->
+  LExpr = replace_var_with_val_in_expr(LExpr0, Bindings),
+  RExpr = replace_var_with_val_in_expr(RExpr0, Bindings),
+  {match,L,LExpr,RExpr};
+replace_var_with_val_in_expr({var, _, _} = VarExpr, Bindings)             ->
+  replace_var_with_val(VarExpr, Bindings);
+replace_var_with_val_in_expr({op, _, _, _, _} = OpsExpr, Bindings)        ->
+  replace_var_with_val_ops(OpsExpr, Bindings);
+replace_var_with_val_in_expr({call, L, {atom, L, F}, ArgList0}, Bindings) ->
+  {call, L, {atom, L, F}, replace_var_with_val_args(ArgList0, Bindings)};
+replace_var_with_val_in_expr([Statement0|T], Bindings)                    ->
   Statement = replace_var_with_val_in_expr(Statement0, Bindings),
   [Statement | replace_var_with_val_in_expr(T, Bindings)].
 
-replace_var_with_val_ops({integer, _, _} = VarExpr, Bindings) ->
-    replace_var_with_val(VarExpr, Bindings);
-replace_var_with_val_ops({var, _, _} = VarExpr, Bindings) ->
-    replace_var_with_val(VarExpr, Bindings);
-replace_var_with_val_ops({op, L, '+', LExpr0, RExpr0}, Bindings)->
-    LExpr = replace_var_with_val_ops(LExpr0, Bindings),
-    RExpr = replace_var_with_val_ops(RExpr0, Bindings),
-    {op, L, '+', LExpr, RExpr};
-replace_var_with_val_ops({op, L, '-', LExpr0, RExpr0}, Bindings)->
-    LExpr = replace_var_with_val_ops(LExpr0, Bindings),
-    RExpr = replace_var_with_val_ops(RExpr0, Bindings),
-    {op, L, '-', LExpr, RExpr};
-replace_var_with_val_ops({op, L, '*', LExpr0, RExpr0}, Bindings)->
-    LExpr = replace_var_with_val_ops(LExpr0, Bindings),
-    RExpr = replace_var_with_val_ops(RExpr0, Bindings),
-    {op, L, '*', LExpr, RExpr};
-replace_var_with_val_ops({op, L, '/', LExpr0, RExpr0}, Bindings)->
-    LExpr = replace_var_with_val_ops(LExpr0, Bindings),
-    RExpr = replace_var_with_val_ops(RExpr0, Bindings),
-    {op, L, '/', LExpr, RExpr};
-replace_var_with_val_ops({call, L, {atom, L, F}, ArgList0}, Bindings) ->
-    {call, L, {atom, L, F}, replace_var_with_val_args(ArgList0, Bindings)}.
+replace_var_with_val_ops({op, L, '+', LExpr0, RExpr0}, Bindings)      ->
+  LExpr = replace_var_with_val_in_expr(LExpr0, Bindings),
+  RExpr = replace_var_with_val_in_expr(RExpr0, Bindings),
+  {op, L, '+', LExpr, RExpr};
+replace_var_with_val_ops({op, L, '-', LExpr0, RExpr0}, Bindings)      ->
+  LExpr = replace_var_with_val_in_expr(LExpr0, Bindings),
+  RExpr = replace_var_with_val_in_expr(RExpr0, Bindings),
+  {op, L, '-', LExpr, RExpr};
+replace_var_with_val_ops({op, L, '*', LExpr0, RExpr0}, Bindings)      ->
+  LExpr = replace_var_with_val_in_expr(LExpr0, Bindings),
+  RExpr = replace_var_with_val_in_expr(RExpr0, Bindings),
+  {op, L, '*', LExpr, RExpr};
+replace_var_with_val_ops({op, L, '/', LExpr0, RExpr0}, Bindings)      ->
+  LExpr = replace_var_with_val_in_expr(LExpr0, Bindings),
+  RExpr = replace_var_with_val_in_expr(RExpr0, Bindings),
+  {op, L, '/', LExpr, RExpr}.
 
 replace_var_with_val({var, L, VariableName}, Bindings) ->
-    Value = proplists:get_value(VariableName, Bindings),
-    {var, L, Value};
+  Value = proplists:get_value(VariableName, Bindings),
+  do_replace(Value, L);
 replace_var_with_val(OtherStruct, _Bindings) ->
     OtherStruct.
+
+do_replace(Value, L) when is_integer(Value) ->
+  {integer, L, Value};
+do_replace(Value, L) when is_float(Value)   ->
+  {float, L, Value}.
+
 
 %%%_* Unit tests ===============================================================
 
