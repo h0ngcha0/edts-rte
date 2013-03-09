@@ -571,43 +571,37 @@ get_file_and_line(M, F, A, CurFile, [_H|T]) ->
 get_file_and_line(_M, _F, _A, _CurFile, []) ->
   {error, not_found}.
 
+%% @doc get the string reprentation of a function body
+-spec get_function_body(M :: module(), F :: function(), A :: integer()) ->
+                           {ok, string()} | {error, any()}.
 get_function_body(M, F, A) ->
   reload_module(M),
   {M, Bin, _File}                   = code:get_object_code(M),
   {ok, {M, Chunks}}                 = beam_lib:chunks(Bin, [abstract_code]),
   {abstract_code, {_Vsn, Abstract}} = lists:keyfind(abstract_code, 1, Chunks),
-  ExportedP = lists:member({F, A}, M:module_info(exports)),
-  {ok, ModSrc} = get_module_source(M, M:module_info()),
-  case get_function(M, F, A, ModSrc, Abstract) of
-    {error, _} = Err   ->
-      Err;
-    {ok, FunBody} ->
-      FunBody
-  end.
+  {ok, ModSrc}                      = get_module_source(M, M:module_info()),
+  get_fun_body(M, F, A, ModSrc, Abstract).
 
-get_function(M, new, A, CurFile,
-                  [{attribute, Line, module, {M, Attrs}}|_T])
-  when length(Attrs) =:= A ->
-  {ok, {CurFile, Line}};
-get_function(_M, F, A, CurFile, [{function, Line, F, A, _Clauses}|_T]) ->
-  io:format("get_file_and_file:~p~n", [{function, Line, F, A, _Clauses}]),
+%% @doc get the string reprentation of a function body
+%%      TODO: what's the type of AbstractCode?
+-spec get_fun_body( M :: module(), F :: function(), A :: integer()
+                  , ModSrc :: string(), AbstractCode :: any()) ->
+                      {ok, string()} | {error, any()}.
+get_fun_body(_M, F, A, _CurFile, [{function, _L, F, A, _C} = Fun|_T]) ->
+  io:format("get_file_and_file:~p~n", [Fun]),
   %% will give us the string representation of the function
-  FunctionBody = lists:flatten(erl_pp:form({function, Line, F, A, _Clauses})),
+  FunctionBody = lists:flatten(erl_pp:form(Fun)),
   {ok, FunctionBody};
-get_function(M, F, A, _CurFile, [{attribute, _, file, {File, _}}|T]) ->
-  get_function(M, F, A, File, T);
-get_function(M, F, A, CurFile, [_H|T]) ->
-  get_function(M, F, A, CurFile, T);
-get_function(_M, _F, _A, _CurFile, []) ->
+get_fun_body(M, F, A, CurFile, [_H|T])                                ->
+  get_fun_body(M, F, A, CurFile, T);
+get_fun_body(_M, _F, _A, _CurFile, [])                                ->
   {error, not_found}.
-               
 
-
-%%------------------------------------------------------------------------------
+%%-----------------------------------------------------------------------------
 %% @doc Parse abstract code into a module information substract.
 -spec parse_abstract(Abstract::[term()], Acc::orddict:orddict()) ->
                         orddict:orddict().
-%%------------------------------------------------------------------------------
+%%-----------------------------------------------------------------------------
 parse_abstract({function, Line, F, A, _Clauses}, Acc) ->
   M = orddict:fetch(module, Acc),
   FunInfo =
