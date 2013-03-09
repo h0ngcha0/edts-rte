@@ -287,11 +287,11 @@ init([]) ->
 %%------------------------------------------------------------------------------
 handle_call({attach, Pid}, _From, #dbg_state{ proc = unattached
                                             , is_rte = false} = State) ->
-  ok = do_attach_pid(Pid, State),
+  ok = do_attach_pid(Pid),
   {reply, {ok, attach, self()}, State#dbg_state{proc = Pid}};
 handle_call({attach, Pid}, _From, #dbg_state{ proc = unattached
                                             , is_rte = true} = State) ->
-  ok = do_attach_pid(Pid, State),
+  ok = do_attach_pid(Pid),
   %% step thru...
   edts_rte_server:finished_attach(Pid),
   {reply, {ok, attach, self()}, State#dbg_state{proc = Pid}};
@@ -473,7 +473,7 @@ code_change(_OldVsn, State, _Extra) ->
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
-do_attach_pid(Pid, State) ->
+do_attach_pid(Pid) ->
   io:format("in hancle_call, attach, Pid:~p~n", [Pid]),
   register_attached(self()),
   int:attached(Pid),
