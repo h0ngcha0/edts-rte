@@ -202,15 +202,13 @@ replace_var_with_val_in_fun(FunBody, Bindings) ->
                                                         , Bindings),
   io:format("New Body before flatten: ~p~n", [NewFunBody]),
   NewForm               = erl_pp:form(NewFunBody),
-  io:format("New Form before flatten: ~p~n", [NewForm]),
   lists:flatten(NewForm).
 
 %% @doc replace variable names with values for a function
 do_replace_var_with_val_in_fun( {function, L, FuncName, Arity, Clauses0}
                               , Bindings) ->
-  io:format("Original Clauses are:~p~n", [Clauses0]),
   Clauses = replace_var_with_val_in_clauses(Clauses0, Bindings),
-  io:format("New Clauses are:~p~n", [Clauses0]),
+  io:format("Replaced Clauses are:~p~n", [Clauses0]),
   {function, L, FuncName, Arity, Clauses}.
 
 %% @doc replace variable names with values in each of the function clauses
@@ -231,12 +229,21 @@ replace_var_with_val_args([VarExpr0|T], Bindings) ->
 
 replace_var_with_val_in_expr([], _Bindings)                               ->
   [];
-replace_var_with_val_in_expr({nil, Var}, _Bindings)                       ->
-  {nil, Var};
-replace_var_with_val_in_expr({float, _, _} = VarExpr, Bindings)           ->
-  replace_var_with_val(VarExpr, Bindings);
-replace_var_with_val_in_expr({integer, _, _} = VarExpr, Bindings)         ->
-  replace_var_with_val(VarExpr, Bindings);
+replace_var_with_val_in_expr({nil, L}, _Bindings)                         ->
+  {nil, L};
+replace_var_with_val_in_expr({cons, L, Expr0, Rest0}, Bindings)           ->
+  Expr = replace_var_with_val_in_expr(Expr0, Bindings),
+  Rest = replace_var_with_val_in_expr(Rest0, Bindings),
+  {cons, L, Expr, Rest};
+replace_var_with_val_in_expr({tuple, L, Exprs0}, Bindings)                ->
+  Exprs = lists:map(fun(Expr) ->
+                        replace_var_with_val_in_expr(Expr, Bindings)
+                    end, Exprs0),
+  {tuple, L, Exprs};
+replace_var_with_val_in_expr({float, _, _} = VarExpr, _Bindings)          ->
+  VarExpr;
+replace_var_with_val_in_expr({integer, _, _} = VarExpr, _Bindings)        ->
+  VarExpr;
 replace_var_with_val_in_expr({match,L,LExpr0,RExpr0}, Bindings)           ->
   LExpr = replace_var_with_val_in_expr(LExpr0, Bindings),
   RExpr = replace_var_with_val_in_expr(RExpr0, Bindings),
@@ -251,34 +258,36 @@ replace_var_with_val_in_expr([Statement0|T], Bindings)                    ->
   Statement = replace_var_with_val_in_expr(Statement0, Bindings),
   [Statement | replace_var_with_val_in_expr(T, Bindings)].
 
-replace_var_with_val_ops({op, L, '+', LExpr0, RExpr0}, Bindings)      ->
+replace_var_with_val_ops({op, L, Ops, LExpr0, RExpr0}, Bindings)  ->
   LExpr = replace_var_with_val_in_expr(LExpr0, Bindings),
   RExpr = replace_var_with_val_in_expr(RExpr0, Bindings),
-  {op, L, '+', LExpr, RExpr};
-replace_var_with_val_ops({op, L, '-', LExpr0, RExpr0}, Bindings)      ->
-  LExpr = replace_var_with_val_in_expr(LExpr0, Bindings),
-  RExpr = replace_var_with_val_in_expr(RExpr0, Bindings),
-  {op, L, '-', LExpr, RExpr};
-replace_var_with_val_ops({op, L, '*', LExpr0, RExpr0}, Bindings)      ->
-  LExpr = replace_var_with_val_in_expr(LExpr0, Bindings),
-  RExpr = replace_var_with_val_in_expr(RExpr0, Bindings),
-  {op, L, '*', LExpr, RExpr};
-replace_var_with_val_ops({op, L, '/', LExpr0, RExpr0}, Bindings)      ->
-  LExpr = replace_var_with_val_in_expr(LExpr0, Bindings),
-  RExpr = replace_var_with_val_in_expr(RExpr0, Bindings),
-  {op, L, '/', LExpr, RExpr}.
+  {op, L, Ops, LExpr, RExpr}.
 
 replace_var_with_val({var, L, VariableName}, Bindings) ->
   Value = proplists:get_value(VariableName, Bindings),
-  do_replace(Value, L);
-replace_var_with_val(OtherStruct, _Bindings) ->
-    OtherStruct.
+  io:format("VarName:~p   L:~p    Val:~p~n", [VariableName, L, Value]),
+  Val = do_replace(Value, L),
+  io:format("replaced Var:~p~n", [Val]),
+  Val.
 
-do_replace(Value, L) when is_integer(Value) ->
-  {integer, L, Value};
-do_replace(Value, L) when is_float(Value)   ->
-  {float, L, Value}.
+do_replace(Value, L) ->
+  ValStr          = lists:flatten(io_lib:format("~p.", [Value])),
+  {ok, Token, _}  = erl_scan:string(ValStr),
+  {ok, [ValForm]} = erl_parse:parse_exprs(Token),
+  replace_line_num(ValForm, L).
 
+replace_line_num({A, _L0, C, D}, L)               ->
+  {A, L, replace_line_num(C, L), replace_line_num(D, L)};
+replace_line_num({A, _L0, C},    L)               ->
+  {A, L, replace_line_num(C, L)};
+replace_line_num({A, _L0},       L)               ->
+  {A, L};
+replace_line_num(Others,  L) when is_list(Others) ->
+  lists:map(fun(Other) ->
+                replace_line_num(Other, L)
+            end, Others);
+replace_line_num(Other,  _L)                      ->
+  Other.
 
 %%%_* Unit tests ===============================================================
 
