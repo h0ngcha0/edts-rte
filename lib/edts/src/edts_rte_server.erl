@@ -214,12 +214,15 @@ do_replace_var_with_val_in_fun( {function, L, FuncName, Arity, Clauses0}
 %% @doc replace variable names with values in each of the function clauses
 replace_var_with_val_in_clauses([], _Bindings)                         ->
   [];
-replace_var_with_val_in_clauses([{clause,L,ArgList0,[],Lines0}|T], Bs) ->
+replace_var_with_val_in_clauses([ {clause,L,ArgList0,WhenList0,Lines0}|T]
+                                , Bs)                                  ->
   %% replace variables' name with values in argument list
-  ArgList = replace_var_with_val_args(ArgList0, Bs),
+  ArgList  = replace_var_with_val_args(ArgList0, Bs),
+  %% replace variables' name with values in "when" list
+  WhenList = replace_var_with_val_args(WhenList0, Bs),
   %% replace variables' name with values for each of the expressions
-  Lines   = replace_var_with_val_in_expr(Lines0, Bs),
-  [ {clause,L,ArgList,[],Lines}
+  Lines    = replace_var_with_val_in_expr(Lines0, Bs),
+  [ {clause,L,ArgList,WhenList,Lines}
   | replace_var_with_val_in_clauses(T, Bs)].
 
 replace_var_with_val_args([], _Bindings)->[];
@@ -229,8 +232,12 @@ replace_var_with_val_args([VarExpr0|T], Bindings) ->
 
 replace_var_with_val_in_expr([], _Bindings)                               ->
   [];
+replace_var_with_val_in_expr(Atom, _Bindings) when is_atom(Atom)          ->
+  Atom;
 replace_var_with_val_in_expr({nil, L}, _Bindings)                         ->
   {nil, L};
+replace_var_with_val_in_expr({atom, _L, _A} = VarExpr, _Bindings)         ->
+  VarExpr;
 replace_var_with_val_in_expr({cons, L, Expr0, Rest0}, Bindings)           ->
   Expr = replace_var_with_val_in_expr(Expr0, Bindings),
   Rest = replace_var_with_val_in_expr(Rest0, Bindings),
@@ -252,8 +259,13 @@ replace_var_with_val_in_expr({var, _, _} = VarExpr, Bindings)             ->
   replace_var_with_val(VarExpr, Bindings);
 replace_var_with_val_in_expr({op, _, _, _, _} = OpsExpr, Bindings)        ->
   replace_var_with_val_ops(OpsExpr, Bindings);
-replace_var_with_val_in_expr({call, L, {atom, L, F}, ArgList0}, Bindings) ->
+replace_var_with_val_in_expr({call, L, {atom, L, F0}, ArgList0}, Bindings) ->
+  F = replace_var_with_val_in_expr(F0, Bindings),
   {call, L, {atom, L, F}, replace_var_with_val_args(ArgList0, Bindings)};
+replace_var_with_val_in_expr({call, L, {remote, L, M0, F0}, Args0}, Bindings) ->
+  M = replace_var_with_val_in_expr(M0, Bindings),
+  F = replace_var_with_val_in_expr(F0, Bindings),
+  {call, L, {remote, L, M, F}, replace_var_with_val_args(Args0, Bindings)};
 replace_var_with_val_in_expr([Statement0|T], Bindings)                    ->
   Statement = replace_var_with_val_in_expr(Statement0, Bindings),
   [Statement | replace_var_with_val_in_expr(T, Bindings)].
@@ -268,7 +280,9 @@ replace_var_with_val({var, L, VariableName}, Bindings) ->
   io:format("VarName:~p   L:~p    Val:~p~n", [VariableName, L, Value]),
   Val = do_replace(Value, L),
   io:format("replaced Var:~p~n", [Val]),
-  Val.
+  Val;
+replace_var_with_val(Other, _Bindings)                 ->
+  Other.
 
 do_replace(Value, L) ->
   ValStr          = lists:flatten(io_lib:format("~p.", [Value])),
