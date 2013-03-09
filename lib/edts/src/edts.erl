@@ -151,13 +151,9 @@ get_breakpoints(Node) ->
 %% Run function
 %% @end
 %%
--spec rte_run(Node :: node(), 
-              Module  :: module(),
-              Fun :: function(),
-              Args :: list(any())) ->
-                 any().
-
-%%------------------------------------------------------------------------------
+-spec rte_run( Node :: node(), Module  :: module(), Fun :: function()
+             , Args :: list(any())) -> any().
+%%-----------------------------------------------------------------------------
 rte_run(Node, Module, Fun, Args) ->
 
   case edts_dist:call(Node, edts_rte_server, rte_run, [Module, Fun, Args]) of
@@ -165,7 +161,7 @@ rte_run(Node, Module, Fun, Args) ->
     Result      -> Result
   end.
 
-%%------------------------------------------------------------------------------
+%%-----------------------------------------------------------------------------
 %% @doc
 %% Returns the result of dialyzing Files on Node.
 %% @end
