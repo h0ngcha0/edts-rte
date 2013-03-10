@@ -155,16 +155,30 @@ handle_cast({send_binding, {break_at, Bindings}}, State) ->
 handle_cast(exit, #dbg_state{bindings = Bindings} = State) ->
   %%io:format("in exit, Bindings:~p~n", [Bindings]),
   %% get function body
-  {M, F, A}  = State#dbg_state.mfa,
-  {ok, Body} = edts_code:get_function_body(M, F, A),
+  {M, F, Arity}  = State#dbg_state.mfa,
+  {ok, Body} = edts_code:get_function_body(M, F, Arity),
   io:format( "output FunBody, Bindings before replace:~n"++Body++"~n"),
   io:format( "Bindings:~n~p~n", [Bindings]),
   %% replace function body with bindings
   ReplacedFun = replace_var_with_val_in_fun(Body, Bindings),
   io:format( "output funbody after replacement:~n"++ReplacedFun++"~n"),
+  send_fun_to_edts(M, F, Arity, ReplacedFun),
   {noreply, State};
 handle_cast(_Msg, State) ->
   {noreply, State}.
+
+send_fun_to_edts(M, F, Arity, FunBody) ->
+  Id  = lists:flatten(io_lib:format("~p__~p__~p", [M, F, Arity])),
+  httpc:request(post, {url(), [], content_type(), mk_editor(Id, FunBody)}, [], []).
+
+url() ->
+  "http://localhost:4587/rte/editors/".
+
+content_type() ->
+  "application/json".
+
+mk_editor(Id, FunBody) ->
+  "{\"x\":74,\"y\":92,\"z\":1,\"id\":\""++Id++"\",\"code\":\""++FunBody++"\"}".
 
 %%------------------------------------------------------------------------------
 %% @private
