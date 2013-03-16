@@ -1,3 +1,8 @@
+(require 'rett-rest)
+
+(defun rett-rest-put-editor (id body)
+  (rett-rest-put "editors" id body))
+
 (defun search-local-function-and-print (function arity)
   "Goto the definition of FUNCTION/ARITY in the current buffer."
   (let ((origin (point))
@@ -15,7 +20,9 @@
 	       ;; output function body and goto original position
 	       (erlang-end-of-function)
 	       (setq end  (point))
-	       (write-region start end "~/test.txt")
+	       ;; push function body on webserver, with parameters x y z method id code
+	       (put-function-body-on-web-with-rest "1" "1" "1" "PUT" "10000" (buffer-substring start end))
+	       ;;(write-region start end "~/test.txt")
 	       (goto-char origin)
 	       (setq searching nil)))
 	    (t
@@ -54,7 +61,10 @@ When FUNCTION is specified, the point is moved to its start."
 		  (setq start (point))
 		  (erlang-end-of-function)
 		  (setq end (point))
-		  (write-region start end "~/test.txt")
+		  ;; push function body on webserver, with parameters x y z method id code
+		  (put-function-body-on-web-with-rest "1" "1" "1" "PUT" "10000" (buffer-substring start end))
+
+		  ;;(write-region start end "~/test.txt")
 	      ))
               (null
                (error "Function %s:%s/%s not found" module function arity)
@@ -70,5 +80,28 @@ When FUNCTION is specified, the point is moved to its start."
    ((apply #'find-source
            (or (ferl-mfa-at-point) (error "No call at point."))))))
 
-(add-hook 'before-save-hook 'find-source-under-point)
-;; end region
+(defun edts-rest-request-2 ()
+  "Send a get request to RESOURCE with ARGS"
+  (let (;;(url                       "http://localhost:8642/editors/1")
+        (url                       "http://127.0.0.1:8642/editors/1")
+        (url-request-method        "GET")
+        ;;(url-request-extra-headers (list '("Content-Type" . "application/json")))
+        ;;(url-request-extra-headers (list '("Content-Type" . "text/html")))
+        ;;(url-request-data          "{\"x\":74,\"y\":92,\"z\":1,\"id\":\"1\",\"code\":\"i am a soldier\"}")
+        (url-show-status           nil))
+    ;;(edts-log-debug "Sending %s-request to %s" method url)
+    (let ((buffer (url-retrieve-synchronously url)))
+      (when buffer
+        (with-current-buffer buffer
+          (print_msg))))))
+       ;;(with-current-buffer buffer
+       ;;   (print_msg))))))
+
+(edts-rest-request-2)
+
+(defun print_msg()
+  (print (buffer-substring (point-min) (point-max)))
+)
+
+
+;;(remove-hook 'before-save-hook 'find-source-under-point)
