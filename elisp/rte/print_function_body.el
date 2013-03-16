@@ -80,8 +80,6 @@ When FUNCTION is specified, the point is moved to its start."
    ((apply #'find-source
            (or (ferl-mfa-at-point) (error "No call at point."))))))
 
-
-
 (defun edts-rest-request-2 ()
   "Send a get request to RESOURCE with ARGS"
   (let (;;(url                       "http://localhost:8642/editors/1")

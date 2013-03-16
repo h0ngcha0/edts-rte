@@ -133,6 +133,11 @@ mk_convert_fun(run_function)               ->
       [Module, Fun, ArgumentsB] = Args,
       [to_atom(Module), to_atom(Fun), to_term(ArgumentsB)]
   end;
+mk_convert_fun(rte_run)                    ->
+  fun (Args) ->
+      [Module, Fun, ArgumentsB] = Args,
+      [to_atom(Module), to_atom(Fun), to_term(ArgumentsB)]
+  end;
 mk_convert_fun(_)                          ->
   fun (Modules) ->
       lists:map(fun to_atom/1, Modules)
