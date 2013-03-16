@@ -415,6 +415,32 @@ associated with that buffer."
       (eproject-attribute :node-sname)
     ('error (edts-shell-node-name))))
 
+(defun edts-rte-run (arguments)
+  "Run on function using rte_run"
+  (interactive "sInput Arguments:")
+  (let* ((resource   (list "debugger" (edts-buffer-node-name) "cmd"))
+         (args       nil)
+         (module     (car (find-mfa-under-point)))
+         (fun        (cadr (find-mfa-under-point)))
+         (body       (get_rte_run_body module fun arguments))
+         (res        (edts-rest-post resource args body)))
+    (print res)
+    ))
+
+(defun get_rte_run_body(module function args)
+  "Get the json body for rte_run rest request"
+  (format "{\"cmd\": \"rte_run\",\"args\": [\"%s\",\"%s\", \"%s\"]}" module function args)
+  )
+
+;; find the mfa of the point
+(defun find-mfa-under-point ()
+  "find the mfa in which the current cursor is located."
+  (interactive)
+  (save-excursion
+    (ferl-beginning-of-function)
+    (print (ferl-mfa-at-point)))
+  )
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Unit tests
 
