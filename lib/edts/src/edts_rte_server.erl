@@ -174,14 +174,16 @@ send_fun(M, F, Arity, FunBody) ->
                      , fun send_fun_to_emacs/4]).
 
 send_fun_to_emacs(M, F, Arity, FunBody) ->
-  Id = lists:flatten(io_lib:format("~p__~p__~p", [M, F, Arity])),
+  Id = lists:flatten(io_lib:format("*~p__~p__~p*", [M, F, Arity])),
   Cmd = make_emacsclient_cmd(Id, FunBody),
   io:format("cmd:~p~n", [Cmd]),
   os:cmd(Cmd).
 
 make_emacsclient_cmd(Id, FunBody) ->
-  "emacsclient "++"\"(edts-display-erl-fun-in-emacs "
-    ++ "\"" ++ FunBody ++ "\" " ++ "\"" ++ Id ++ "\"" ++")\"".
+  "emacsclient -e '(edts-display-erl-fun-in-emacs "
+    ++ "\""++FunBody++ "\" "
+    ++ "\" "++Id++"\" "
+    ++")'".
 
 send_fun_to_edts(M, F, Arity, FunBody) ->
   Id  = lists:flatten(io_lib:format("~p__~p__~p", [M, F, Arity])),
