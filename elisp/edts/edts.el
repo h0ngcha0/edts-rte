@@ -441,6 +441,17 @@ associated with that buffer."
     (print (ferl-mfa-at-point)))
   )
 
+(defun edts-display-erl-fun-in-emacs (string buffer)
+  "display a piece of erlang code in a buffer"
+  (window-normalize-buffer-to-switch-to buffer)
+  (display-buffer buffer)
+  (with-current-buffer buffer
+    (save-excursion
+      (erase-buffer)
+      (goto-char (point-max))
+      (insert string)
+      (erlang-mode))))
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Unit tests
 
