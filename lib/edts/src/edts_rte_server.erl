@@ -162,10 +162,28 @@ handle_cast(exit, #dbg_state{bindings = Bindings} = State) ->
   %% replace function body with bindings
   ReplacedFun = replace_var_with_val_in_fun(Body, Bindings),
   io:format( "output funbody after replacement:~n"++ReplacedFun++"~n"),
-  send_fun_to_edts(M, F, Arity, ReplacedFun),
+  send_fun(M, F, Arity, ReplacedFun),
   {noreply, State};
 handle_cast(_Msg, State) ->
   {noreply, State}.
+
+send_fun(M, F, Arity, FunBody) ->
+  lists:foreach(fun(Fun) ->
+                    Fun(M, F, Arity, FunBody)
+                end, [ fun send_fun_to_edts/4
+                     , fun send_fun_to_emacs/4]).
+
+send_fun_to_emacs(M, F, Arity, FunBody) ->
+  Id = lists:flatten(io_lib:format("*~p__~p__~p*", [M, F, Arity])),
+  Cmd = make_emacsclient_cmd(Id, FunBody),
+  io:format("cmd:~p~n", [Cmd]),
+  os:cmd(Cmd).
+
+make_emacsclient_cmd(Id, FunBody) ->
+  "emacsclient -e '(edts-display-erl-fun-in-emacs "
+    ++ "\""++FunBody++ "\" "
+    ++ "\" "++Id++"\" "
+    ++")'".
 
 send_fun_to_edts(M, F, Arity, FunBody) ->
   Id  = lists:flatten(io_lib:format("~p__~p__~p", [M, F, Arity])),

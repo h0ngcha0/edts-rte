@@ -422,9 +422,8 @@ associated with that buffer."
          (args       nil)
          (module     (car (find-mfa-under-point)))
          (fun        (cadr (find-mfa-under-point)))
-         (body       (get_rte_run_body module fun arguments))
-         (res        (edts-rest-post resource args body)))
-    (print res)
+         (body       (get_rte_run_body module fun arguments)))
+    (edts-rest-post resource args body)
     ))
 
 (defun get_rte_run_body(module function args)
@@ -438,8 +437,19 @@ associated with that buffer."
   (interactive)
   (save-excursion
     (ferl-beginning-of-function)
-    (print (ferl-mfa-at-point)))
+    (ferl-mfa-at-point))
   )
+
+(defun edts-display-erl-fun-in-emacs (string buffer)
+  "display a piece of erlang code in a buffer"
+  (window-normalize-buffer-to-switch-to buffer)
+  (display-buffer buffer)
+  (with-current-buffer buffer
+    (save-excursion
+      (erase-buffer)
+      (goto-char (point-max))
+      (insert string)
+      (erlang-mode))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Unit tests
