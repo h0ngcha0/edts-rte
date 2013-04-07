@@ -190,15 +190,17 @@ send_fun(M, F, Arity, FunBody) ->
 
 send_fun_to_emacs(M, F, Arity, FunBody) ->
   Id = lists:flatten(io_lib:format("*~p__~p__~p*", [M, F, Arity])),
+  io:format("~n~nFunBody:~p~n", [FunBody]),
   Cmd = make_emacsclient_cmd(Id, FunBody),
-  io:format("cmd:~p~n", [Cmd]),
+  io:format("~n~ncmd:~p~n~n~n", [Cmd]),
   os:cmd(Cmd).
 
 make_emacsclient_cmd(Id, FunBody) ->
-  "emacsclient -e '(edts-display-erl-fun-in-emacs "
-    ++ "\""++FunBody++ "\" "
-    ++ "\" "++Id++"\" "
-    ++")'".
+  lists:flatten(io_lib:format(
+                  "emacsclient -e '(edts-display-erl-fun-in-emacs "
+                  ++ ""++"~p"++ " "
+                  ++ " "++"~p"++" "
+                  ++")'", [FunBody, Id])).
 
 send_fun_to_edts(M, F, Arity, FunBody) ->
   Id  = lists:flatten(io_lib:format("~p__~p__~p", [M, F, Arity])),
@@ -317,8 +319,11 @@ replace_var_with_val_in_expr({'case', L, CaseExpr0, Clauses0}, Bindings)  ->
   CaseExpr = replace_var_with_val_in_expr(CaseExpr0, Bindings),
   Clauses  = replace_var_with_val_in_clauses(Clauses0, Bindings),
   {'case', L, CaseExpr, Clauses};
-replace_var_with_val_in_expr({string, _L, _String}, _Bindings)  ->
-  {string, _L, _String};
+replace_var_with_val_in_expr({string, _L, _Str} = String, _Bindings)      ->
+  String;
+replace_var_with_val_in_expr({'receive', L, Clauses0}, Bindings)        ->
+  Clauses  = replace_var_with_val_in_clauses(Clauses0, Bindings),
+  {recieve, L, Clauses};
 replace_var_with_val_in_expr({record, _, _Name, _Fields} = Record, _Bindings)  ->
   edts_rte_record_manager:expand_records(?RCDTBL, Record);
 replace_var_with_val_in_expr([Statement0|T], Bindings)                    ->
@@ -340,10 +345,47 @@ replace_var_with_val(Other, _Bindings)                 ->
   Other.
 
 do_replace(Value, L) ->
-  ValStr          = lists:flatten(io_lib:format("~p.", [Value])),
-  {ok, Token, _}  = erl_scan:string(ValStr),
-  {ok, [ValForm]} = erl_parse:parse_exprs(Token),
+  ValStr           = lists:flatten(io_lib:format("~p.", [Value])),
+  Tokens0          = get_tokens(ValStr),
+  io:format("Tokens0:~p~n", [Tokens0]),
+  Tokens           = maybe_replace_pid(Tokens0, Value),
+  io:format("Tokens:~p~n", [Tokens]),
+  {ok, [ValForm]}  = erl_parse:parse_exprs(Tokens),
+  io:format("ValForm:~p~n", [ValForm]),
   replace_line_num(ValForm, L).
+
+get_tokens(ValStr) ->
+  {ok, Tokens, _} = erl_scan:string(ValStr),
+  Tokens.
+
+%% pid is displayed as atom instead. coz it is not a valid erlang term
+maybe_replace_pid(Tokens0, Value) ->
+  case is_pid_tokens(Tokens0) of
+    true  ->
+      ValStr0 = lists:flatten(io_lib:format("{__pid__, ~p}", [Value])),
+      io:format("pid token:~p~n", [Tokens0]),
+      ValStr1 = re:replace(ValStr0, "\\.", ",", [{return, list}, global]),
+      ValStr2 = re:replace(ValStr1, "\\<", "{", [{return, list}, global]),
+      ValStr  = re:replace(ValStr2, "\\>", "}", [{return, list}, global]),
+      get_tokens(ValStr++".");
+    false ->
+      Tokens0
+  end.
+
+is_pid_tokens(Tokens) ->
+  [FirstElem | _] = Tokens,
+  [{dot, _}, LastElem | _] = lists:reverse(Tokens),
+  is_left_arrow(FirstElem) andalso is_right_arrow(LastElem).
+
+is_left_arrow({Char, _}) when Char =:= '<' ->
+  true;
+is_left_arrow(_) ->
+  false.
+
+is_right_arrow({Char, _}) when Char =:= '>' ->
+  true;
+is_right_arrow(_) ->
+  false.
 
 replace_line_num({A, _L0, C, D}, L)               ->
   {A, L, replace_line_num(C, L), replace_line_num(D, L)};
