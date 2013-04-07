@@ -323,7 +323,13 @@ replace_var_with_val_in_expr({string, _L, _Str} = String, _Bindings)      ->
   String;
 replace_var_with_val_in_expr({'receive', L, Clauses0}, Bindings)        ->
   Clauses  = replace_var_with_val_in_clauses(Clauses0, Bindings),
-  {recieve, L, Clauses};
+  {'receive', L, Clauses};
+replace_var_with_val_in_expr({'receive', L, Clauses0, Int, Exprs0}, Bindings)        ->
+  Clauses  = replace_var_with_val_in_clauses(Clauses0, Bindings),
+  Expr     = lists:map(fun (Expr) ->
+                           replace_var_with_val_in_expr(Expr, Bindings)
+                       end, Exprs0),
+  {'receive', L, Clauses, Int, Expr};
 replace_var_with_val_in_expr({record, _, _Name, _Fields} = Record, _Bindings)  ->
   edts_rte_record_manager:expand_records(?RCDTBL, Record);
 replace_var_with_val_in_expr([Statement0|T], Bindings)                    ->
