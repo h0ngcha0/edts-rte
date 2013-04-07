@@ -62,7 +62,8 @@
           stack = {1, 1}         :: {non_neg_integer(), non_neg_integer()},
           listeners = []         :: [term()],
           interpretation = false :: boolean(),
-          is_rte = false         :: boolean()
+          is_rte = false         :: boolean(),
+          cur = 0                :: non_neg_integer()
          }).
 
 %%%_* Types ====================================================================
@@ -402,12 +403,12 @@ handle_cast(_Msg, State) ->
                                       {stop, Reason::atom(), state()}.
 %%------------------------------------------------------------------------------
 %% Hit a breakpoint
-handle_info({Meta, {break_at, Module, Line, _Cur}}, State) ->
+handle_info({Meta, {break_at, Module, Line, Cur}}, State) ->
   Bindings = int:meta(Meta, bindings, nostack),
   File = int:file(Module),
-  notify({break, File, {Module, Line}, Bindings}),
+  notify({break, File, {Module, Line}, Cur, Bindings}),
   case State#dbg_state.is_rte of
-    true  -> edts_rte_server:send_binding({break_at, Bindings});
+    true  -> edts_rte_server:send_binding({break_at, Bindings, Module, Line, Cur});
     false -> do_nothing
   end,
   {noreply, State};
@@ -473,7 +474,7 @@ code_change(_OldVsn, State, _Extra) ->
 %%% Internal functions
 %%%===================================================================
 do_attach_pid(Pid) ->
-  io:format("in hancle_call, attach, Pid:~p~n", [Pid]),
+  io:format("in handle_call, attach, Pid:~p~n", [Pid]),
   register_attached(self()),
   int:attached(Pid),
   error_logger:info_msg("Debugger ~p attached to ~p~n", [self(), Pid]),

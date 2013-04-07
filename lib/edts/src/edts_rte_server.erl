@@ -59,6 +59,8 @@
                    , bindings     = []         :: binding()
                    , mfa          = {}         :: {} | tuple()
                    , record_table = undefined
+                   , depth        = 0          :: non_neg_integer()
+                   , line         = undefined  :: non_neg_integer() | undefined
                    }).
 
 %%%_* Types ====================================================================
@@ -181,14 +183,36 @@ handle_cast({finished_attach, Pid}, State) ->
   io:format("finish attach.....~n"),
   {noreply, State};
 
-handle_cast({send_binding, {break_at, Bindings}}, State) ->
+handle_cast({send_binding, {break_at, Bindings, Module, Line, Depth}}, State) ->
   io:format("send_binding......before step~n"),
   edts_rte_int_listener:step(),
   io:format("send_binding......Bindings:~p~n",[Bindings]),
-  {noreply, State#dbg_state{bindings = Bindings}};
+
+  %% get mfa and add one level if it is not main function
+  %% output sub function body when the process leaves it.
+  %% Only step into one more depth right now.
+  MFA = case State#dbg_state.depth > Depth of
+          true  ->
+            %% Sub function call is finished, output subfunction body
+            replace_fun_body_and_send(State),
+            edts_rte_erlang:get_mfa_from_line(Module, State#dbg_state.line);
+          false ->
+            State#dbg_state.mfa
+        end,
+
+  %% save current bindings for further use
+  {noreply, State#dbg_state{bindings = Bindings, mfa = MFA, depth = Depth, line = Line}};
 
 handle_cast(exit, #dbg_state{bindings = Bindings} = State) ->
-  %%io:format("in exit, Bindings:~p~n", [Bindings]),
+  io:format("in exit, Bindings:~p~n", [Bindings]),
+  replace_fun_body_and_send(State),
+  {noreply, State};
+handle_cast(_Msg, State) ->
+  {noreply, State};
+handle_cast(_Msg, State) ->
+  {noreply, State}.
+
+replace_fun_body_and_send(#dbg_state{bindings = Bindings} = State) ->
   %% get function body
   {M, F, Arity}  = State#dbg_state.mfa,
   {ok, Body} = edts_code:get_function_body(M, F, Arity),
@@ -197,10 +221,7 @@ handle_cast(exit, #dbg_state{bindings = Bindings} = State) ->
   %% replace function body with bindings
   ReplacedFun = edts_rte_erlang:var_to_val_in_fun(Body, Bindings),
   io:format( "output funbody after replacement:~p~n", [ReplacedFun]),
-  ok = send_fun(M, F, Arity, ReplacedFun),
-  {noreply, State};
-handle_cast(_Msg, State) ->
-  {noreply, State}.
+  send_fun(M, F, Arity, ReplacedFun).
 
 %%------------------------------------------------------------------------------
 %% @private

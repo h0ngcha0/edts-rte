@@ -29,6 +29,7 @@
         , expand_records/2
         , read_and_add_records/2
         , var_to_val_in_fun/2
+        , get_mfa_from_line/2
         ]).
 
 %%%_* Includes =================================================================
@@ -58,7 +59,28 @@ expand_records(RT, E0) ->
 read_and_add_records(Module, RT) ->
   read_and_add_records(Module, '_', [], [], RT).
 
+get_mfa_from_line(M, L0) ->
+  FAs = int:functions(M),
+  AllFuns = lists:foldl(
+    fun([F, A], AllFuns) ->
+        FunInfo = edts_code:get_function_info(M, F, A),
+        {line, Line} = lists:keyfind(line, 1, FunInfo),
+        [[Line, F, A] | AllFuns] end, [], FAs),
+  SortedAllFuns = lists:reverse(lists:sort(AllFuns)),
+  %% [Line, F, A]
+  [L, F, A] = find_function(L0, SortedAllFuns),
+  {M, F, A}.
+
 %%%_* Internal =================================================================
+
+find_function(L, [])                     ->
+  [];
+find_function(L, [[L0, F, A] = LFA | T]) ->
+  case L > L0 of
+    true  -> LFA;
+    false -> find_function(L, T)
+  end.
+
 read_and_add_records(Module, Selected, Options, Bs, RT) ->
   Info             = edts_code:get_module_info(Module, basic),
   {source, Source} = lists:keyfind(source, 1, Info),
