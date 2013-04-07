@@ -34,6 +34,7 @@
         , finished_attach/1
         , send_binding/1
         , send_exit/0
+        , read_and_add_records/1
         ]).
 
 %% gen_server callbacks
@@ -94,6 +95,11 @@ send_binding(Msg) ->
 
 send_exit() ->
   gen_server:cast(?SERVER, exit).
+
+%% FIXME: need to come up with a way to add all existing records from
+%%        a project and remove records when recompile a particular module
+read_and_add_records(Module) ->
+  edts_rte_record_manager:read_and_add_records(Module, ?RCDTBL).
 
 %%%_* gen_server callbacks  ====================================================
 %%------------------------------------------------------------------------------
