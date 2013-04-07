@@ -45,9 +45,12 @@
 
 %%%_* Defines ==================================================================
 -define(SERVER, ?MODULE).
--record(dbg_state, { proc     = unattached :: unattached | pid()
-                   , bindings = []         :: binding()
-                   , mfa      = {}         :: {} | tuple()
+-define(RCDTBL, edts_rte_record_table).
+
+-record(dbg_state, { proc         = unattached :: unattached | pid()
+                   , bindings     = []         :: binding()
+                   , mfa          = {}         :: {} | tuple()
+                   , record_table = undefined
                    }).
 
 %%%_* Types ====================================================================
@@ -104,16 +107,23 @@ send_exit() ->
                       {stop, atom()}.
 %%------------------------------------------------------------------------------
 init([]) ->
-  {ok, #dbg_state{}}.
+  %% set the table to public to make debugging easier
+  RcdTbl = ets:new(?RCDTBL, [public, named_table]),
+  io:format("RcdTbl:~p", [RcdTbl]),
+  {ok, #dbg_state{record_table = RcdTbl}}.
 
 handle_call({rte_run, Module, Fun, Args}, _From, State) ->
+  RcdTbl   = State#dbg_state.record_table,
+  ArgsTerm = to_term(Args, RcdTbl),
+  io:format("ArgsTerm:~p~n", [ArgsTerm]),
   ok       = edts_rett_server:set_rte_flag(),
   [Module] = edts_rett_server:interpret_modules([Module]),
-  Arity    = length(Args),
+  Arity    = length(ArgsTerm),
+  io:format("Arity:~p~n", [Arity]),
   io:format("get function body after interpret~n"),
   {ok, set, {Module, Fun, Arity}} =  edts_rett_server:set_breakpoint(Module, Fun, Arity),
   io:format("rte_run: after setbreakpoint~n"),
-  Pid      = erlang:spawn(Module, Fun, Args),
+  Pid      = erlang:spawn(Module, Fun, ArgsTerm),
   io:format("called function pid:~p~n", [Pid]),
   {reply, {ok, finished}, State#dbg_state{ proc = Pid
                                          , bindings = []
@@ -157,11 +167,11 @@ handle_cast(exit, #dbg_state{bindings = Bindings} = State) ->
   %% get function body
   {M, F, Arity}  = State#dbg_state.mfa,
   {ok, Body} = edts_code:get_function_body(M, F, Arity),
-  io:format( "output FunBody, Bindings before replace:~n"++Body++"~n"),
+  io:format( "output FunBody, Bindings before replace:~p~n", [Body]),
   io:format( "Bindings:~n~p~n", [Bindings]),
   %% replace function body with bindings
   ReplacedFun = replace_var_with_val_in_fun(Body, Bindings),
-  io:format( "output funbody after replacement:~n"++ReplacedFun++"~n"),
+  io:format( "output funbody after replacement:~p~n", [ReplacedFun]),
   send_fun(M, F, Arity, ReplacedFun),
   {noreply, State};
 handle_cast(_Msg, State) ->
@@ -171,7 +181,8 @@ send_fun(M, F, Arity, FunBody) ->
   lists:foreach(fun(Fun) ->
                     Fun(M, F, Arity, FunBody)
                 end, [ fun send_fun_to_edts/4
-                     , fun send_fun_to_emacs/4]).
+                     , fun send_fun_to_emacs/4
+                     ]).
 
 send_fun_to_emacs(M, F, Arity, FunBody) ->
   Id = lists:flatten(io_lib:format("*~p__~p__~p*", [M, F, Arity])),
@@ -291,13 +302,21 @@ replace_var_with_val_in_expr({var, _, _} = VarExpr, Bindings)             ->
   replace_var_with_val(VarExpr, Bindings);
 replace_var_with_val_in_expr({op, _, _, _, _} = OpsExpr, Bindings)        ->
   replace_var_with_val_ops(OpsExpr, Bindings);
-replace_var_with_val_in_expr({call, L, {atom, L, F0}, ArgList0}, Bindings) ->
+replace_var_with_val_in_expr({call, L, {atom, L, F0}, ArgList0}, Bindings)->
   F = replace_var_with_val_in_expr(F0, Bindings),
   {call, L, {atom, L, F}, replace_var_with_val_args(ArgList0, Bindings)};
 replace_var_with_val_in_expr({call, L, {remote, L, M0, F0}, Args0}, Bindings) ->
   M = replace_var_with_val_in_expr(M0, Bindings),
   F = replace_var_with_val_in_expr(F0, Bindings),
   {call, L, {remote, L, M, F}, replace_var_with_val_args(Args0, Bindings)};
+replace_var_with_val_in_expr({'case', L, CaseExpr0, Clauses0}, Bindings)  ->
+  CaseExpr = replace_var_with_val_in_expr(CaseExpr0, Bindings),
+  Clauses  = replace_var_with_val_in_clauses(Clauses0, Bindings),
+  {'case', L, CaseExpr, Clauses};
+replace_var_with_val_in_expr({string, _L, _String}, _Bindings)  ->
+  {string, _L, _String};
+replace_var_with_val_in_expr({record, _, _Name, _Fields} = Record, _Bindings)  ->
+  edts_rte_record_manager:expand_records(?RCDTBL, Record);
 replace_var_with_val_in_expr([Statement0|T], Bindings)                    ->
   Statement = replace_var_with_val_in_expr(Statement0, Bindings),
   [Statement | replace_var_with_val_in_expr(T, Bindings)].
@@ -334,6 +353,23 @@ replace_line_num(Others,  L) when is_list(Others) ->
             end, Others);
 replace_line_num(Other,  _L)                      ->
   Other.
+
+to_term(Arguments0, RT) ->
+  Arguments = binary_to_list(Arguments0),
+  io:format("args:~p~n", [Arguments]),
+  %% N.B. this is very hackish. added a '.' because
+  %%      erl_scan:string/1 requires full expression with dot
+  {ok, Tokens,__Endline} = erl_scan:string(Arguments++"."),
+  io:format("tokens:~p~n", [Tokens]),
+  {ok, AbsForm0}         = erl_parse:parse_exprs(Tokens),
+  AbsForm                = replace_var_with_val_in_expr(AbsForm0, []),
+  io:format("absf:~p~n", [AbsForm0]),
+  Val     = erl_eval:exprs( AbsForm
+                          , erl_eval:new_bindings()),
+  io:format("Valg:~p~n", [Val]),
+  {value, Value,_Bs} = Val,
+  io:format("val:~p~n", [Value]),
+  Value.
 
 %%%_* Unit tests ===============================================================
 

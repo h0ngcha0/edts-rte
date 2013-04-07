@@ -285,6 +285,7 @@ do_init_node(Node, ProjectRoot, LibDirs) ->
                                               edts_eunit,
                                               edts_rett_server,
                                               edts_rte_server,
+                                              edts_rte_record_manager,
                                               edts_eunit_listener,
                                               edts_xref,
                                               edts_util]),
