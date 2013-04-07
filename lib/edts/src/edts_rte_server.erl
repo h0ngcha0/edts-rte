@@ -164,9 +164,9 @@ handle_call({rte_run, Module, Fun, Args0}, _From, State) ->
 -spec handle_info(term(), state()) -> {noreply, state()} |
                                       {noreply, state(), Timeout::timeout()} |
                                       {stop, Reason::atom(), state()}.
-handle_info(Msg, State) ->
-  io:format("in handle_info ...., break_at, Msg:~p~n", [Msg]),
-  {noreply, State}.
+handle_info(Msg, _State) ->
+  %%io:format("in handle_info ...., break_at, Msg:~p~n", [Msg]),
+  {noreply, _State}.
 
 %%------------------------------------------------------------------------------
 %% @private
@@ -184,37 +184,41 @@ handle_cast({finished_attach, Pid}, State) ->
   {noreply, State};
 
 handle_cast({send_binding, {break_at, Bindings, Module, Line, Depth}}, State) ->
-  io:format("send_binding......before step~n"),
+  io:format("send_binding......before step. old depth:~p , new_depth:~p~n", [State#dbg_state.depth, Depth]),
   edts_rte_int_listener:step(),
-  io:format("send_binding......Bindings:~p~n",[Bindings]),
+  io:format("send_binding......Line:~p, Bindings:~p~n",[Line, Bindings]),
 
+  MFA = edts_rte_erlang:get_mfa_from_line(Module, State#dbg_state.line),
   %% get mfa and add one level if it is not main function
   %% output sub function body when the process leaves it.
   %% Only step into one more depth right now.
-  MFA = case State#dbg_state.depth > Depth of
-          true  ->
-            %% Sub function call is finished, output subfunction body
-            replace_fun_body_and_send(State),
-            edts_rte_erlang:get_mfa_from_line(Module, State#dbg_state.line);
-          false ->
-            State#dbg_state.mfa
-        end,
+  case State#dbg_state.depth > Depth of
+    true  ->
+      %% Sub function call is finished, output subfunction body
+      replace_fun_body_and_send(State#dbg_state.bindings, State#dbg_state.mfa),
+      io:format( "in send_binding...:~n mfa:~p~nbinding:~p~nDepth:~p~n"
+               , [State#dbg_state.mfa, State#dbg_state.bindings, Depth]),
+      MFA;
+    false ->
+      State#dbg_state.mfa
+  end,
 
   %% save current bindings for further use
   {noreply, State#dbg_state{bindings = Bindings, mfa = MFA, depth = Depth, line = Line}};
 
 handle_cast(exit, #dbg_state{bindings = Bindings} = State) ->
-  io:format("in exit, Bindings:~p~n", [Bindings]),
-  replace_fun_body_and_send(State),
+  io:format( "in exit...:~n mfa:~p~nbinding:~p~n"
+           , [State#dbg_state.mfa, Bindings]),
+  replace_fun_body_and_send(Bindings, State#dbg_state.mfa),
   {noreply, State};
 handle_cast(_Msg, State) ->
   {noreply, State};
 handle_cast(_Msg, State) ->
   {noreply, State}.
 
-replace_fun_body_and_send(#dbg_state{bindings = Bindings} = State) ->
+replace_fun_body_and_send(Bindings, MFA) ->
   %% get function body
-  {M, F, Arity}  = State#dbg_state.mfa,
+  {M, F, Arity}  = MFA,
   {ok, Body} = edts_code:get_function_body(M, F, Arity),
   io:format( "output FunBody, Bindings before replace:~p~n", [Body]),
   io:format( "Bindings:~n~p~n", [Bindings]),
