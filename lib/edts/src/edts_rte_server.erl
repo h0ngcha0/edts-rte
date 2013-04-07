@@ -114,6 +114,10 @@ init([]) ->
 
 handle_call({rte_run, Module, Fun, Args}, _From, State) ->
   RcdTbl   = State#dbg_state.record_table,
+  %% try to read the record from this module.. right now this is the
+  %% only record support
+  AddedRds = edts_rte_record_manager:read_and_add_records(Module, RcdTbl),
+  io:format("AddedRds:~p~n", [AddedRds]),
   ArgsTerm = to_term(Args, RcdTbl),
   io:format("ArgsTerm:~p~n", [ArgsTerm]),
   ok       = edts_rett_server:set_rte_flag(),
