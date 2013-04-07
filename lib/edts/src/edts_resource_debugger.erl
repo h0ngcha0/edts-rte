@@ -136,7 +136,7 @@ mk_convert_fun(run_function)               ->
 mk_convert_fun(rte_run)                    ->
   fun (Args) ->
       [Module, Fun, ArgumentsB] = Args,
-      [to_atom(Module), to_atom(Fun), to_term(ArgumentsB)]
+      [to_atom(Module), to_atom(Fun), ArgumentsB]
   end;
 mk_convert_fun(_)                          ->
   fun (Modules) ->
@@ -170,7 +170,6 @@ do_retrieve_cmd_and_args({struct,[{<<"cmd">>, Cmd}, {<<"args">>, Args}]}) ->
   {Command, ConvertFun(Args)};
 do_retrieve_cmd_and_args({struct,[{<<"cmd">>, Cmd}]}) ->
   {to_atom(Cmd), nil}.
-
 
 run_command(rte_run, [Module, Fun, Args], Node)                 ->
   edts:rte_run(Node, Module, Fun, Args);
