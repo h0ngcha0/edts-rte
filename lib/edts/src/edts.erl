@@ -152,7 +152,7 @@ get_breakpoints(Node) ->
 %% @end
 %%
 -spec rte_run( Node :: node(), Module  :: module(), Fun :: function()
-             , Args :: list(any())) -> any().
+             , Args :: string()) -> any().
 %%-----------------------------------------------------------------------------
 rte_run(Node, Module, Fun, Args) ->
 
