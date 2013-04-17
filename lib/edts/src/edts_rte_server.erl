@@ -142,7 +142,6 @@ handle_call({rte_run, Module, Fun, Args0}, _From, State) ->
   Args     = binary_to_list(Args0),
   ArgsTerm = edts_rte_erlang:convert_list_to_term(Args, RcdTbl),
   io:format("ArgsTerm:~p~n", [ArgsTerm]),
-  ok       = edts_rte_int_listener:set_rte_flag(),
   [Module] = edts_rte_int_listener:interpret_modules([Module]),
   Arity    = length(ArgsTerm),
   io:format("Arity:~p~n", [Arity]),

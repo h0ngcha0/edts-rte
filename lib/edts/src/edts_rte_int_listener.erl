@@ -36,7 +36,6 @@
         , is_module_interpreted/1
         , maybe_attach/1
         , set_breakpoint/3
-        , set_rte_flag/0
         , started_p/0
         , step/0
         , step_out/0
@@ -62,7 +61,6 @@
           stack = {1, 1}         :: {non_neg_integer(), non_neg_integer()},
           listeners = []         :: [term()],
           interpretation = false :: boolean(),
-          is_rte = false         :: boolean(),
           cur = 0                :: non_neg_integer()
          }).
 
@@ -136,15 +134,6 @@ interpret_node(Exclusions) ->
 %%------------------------------------------------------------------------------
 is_node_interpreted() ->
   gen_server:call(?SERVER, is_node_interpreted).
-
-%%------------------------------------------------------------------------------
-%% @doc
-%% Set the rte flag to true
-%% @end
--spec set_rte_flag() -> boolean().
-%%------------------------------------------------------------------------------
-set_rte_flag() ->
-  gen_server:call(?SERVER, set_rte_flag).
 
 %%------------------------------------------------------------------------------
 %% @doc
@@ -285,12 +274,7 @@ init([]) ->
                      {stop, Reason::atom(), term(), state()} |
                      {stop, Reason::atom(), state()}.
 %%------------------------------------------------------------------------------
-handle_call({attach, Pid}, _From, #dbg_state{ proc = unattached
-                                            , is_rte = false} = State) ->
-  ok = do_attach_pid(Pid),
-  {reply, {ok, attach, self()}, State#dbg_state{proc = Pid}};
-handle_call({attach, Pid}, _From, #dbg_state{ proc = unattached
-                                            , is_rte = true} = State) ->
+handle_call({attach, Pid}, _From, #dbg_state{proc = unattached} = State) ->
   ok = do_attach_pid(Pid),
   %% step thru...
   edts_rte_server:finished_attach(Pid),
@@ -349,9 +333,6 @@ handle_call(wait_for_debugger, From, State) ->
   Listeners = State#dbg_state.listeners,
   {noreply, State#dbg_state{listeners = [From|Listeners]}};
 
-handle_call(set_rte_flag, _From, State) ->
-  {reply, ok, State#dbg_state{is_rte = true}};
-
 handle_call(_Cmd, _From, #dbg_state{proc = unattached} = State) ->
   {reply, {error, unattached}, State};
 
@@ -407,10 +388,7 @@ handle_info({Meta, {break_at, Module, Line, Cur}}, State) ->
   Bindings = int:meta(Meta, bindings, nostack),
   File = int:file(Module),
   notify({break, File, {Module, Line}, Cur, Bindings}),
-  case State#dbg_state.is_rte of
-    true  -> edts_rte_server:send_binding({break_at, Bindings, Module, Line, Cur});
-    false -> do_nothing
-  end,
+  edts_rte_server:send_binding({break_at, Bindings, Module, Line, Cur}),
   {noreply, State};
 
 %% Became idle (not executing any code under debugging)
@@ -439,12 +417,11 @@ handle_info({Meta, {exit_at, _, _Reason, _}}, State) ->
   io:format("in handle_info, till exit_at, Bindings:~p~n", [Bindings]),
   edts_rte_server:send_exit(),
   io:format("exit signal sent~n"),
-  {noreply, State#dbg_state{proc = unattached, is_rte=false}};
+  {noreply, State#dbg_state{proc = unattached}};
 
 handle_info(Msg, State) ->
   error_logger:info_msg("Unexpected message: ~p~n", [Msg]),
   {noreply, State}.
-
 
 %%------------------------------------------------------------------------------
 %% @private
