@@ -184,10 +184,8 @@ handle_cast({finished_attach, Pid}, State) ->
 
 handle_cast({send_binding, {break_at, Bindings, Module, Line, Depth}}, State) ->
   io:format("send_binding......before step. old depth:~p , new_depth:~p~n", [State#dbg_state.depth, Depth]),
-  edts_rte_int_listener:step(),
   io:format("send_binding......Line:~p, Bindings:~p~n",[Line, Bindings]),
 
-  MFA = edts_rte_erlang:get_mfa_from_line(Module, State#dbg_state.line),
   %% get mfa and add one level if it is not main function
   %% output sub function body when the process leaves it.
   %% Only step into one more depth right now.
@@ -196,11 +194,20 @@ handle_cast({send_binding, {break_at, Bindings, Module, Line, Depth}}, State) ->
       %% Sub function call is finished, output subfunction body
       replace_fun_body_and_send(State#dbg_state.bindings, State#dbg_state.mfa),
       io:format( "in send_binding...:~n mfa:~p~nbinding:~p~nDepth:~p~n"
-               , [State#dbg_state.mfa, State#dbg_state.bindings, Depth]),
-      MFA;
+                 , [State#dbg_state.mfa, State#dbg_state.bindings, Depth]);
     false ->
       State#dbg_state.mfa
   end,
+
+  MFA = case State#dbg_state.depth =/= Depth of
+          true  ->
+            edts_rte_erlang:get_mfa_from_line(Module, Line);
+          false ->
+            State#dbg_state.mfa
+        end,
+  io:format("old mfa:~p~n", [State#dbg_state.mfa]),
+  io:format("new mfa:~p~n", [MFA]),
+  edts_rte_int_listener:step(),
 
   %% save current bindings for further use
   {noreply, State#dbg_state{bindings = Bindings, mfa = MFA, depth = Depth, line = Line}};
@@ -219,11 +226,11 @@ replace_fun_body_and_send(Bindings, MFA) ->
   %% get function body
   {M, F, Arity}  = MFA,
   {ok, Body} = edts_code:get_function_body(M, F, Arity),
-  io:format( "output FunBody, Bindings before replace:~p~n", [Body]),
-  io:format( "Bindings:~n~p~n", [Bindings]),
+  %% io:format( "output FunBody, Bindings before replace:~p~n", [Body]),
+  %% io:format( "Bindings:~n~p~n", [Bindings]),
   %% replace function body with bindings
   ReplacedFun = edts_rte_erlang:var_to_val_in_fun(Body, Bindings),
-  io:format( "output funbody after replacement:~p~n", [ReplacedFun]),
+  %% io:format( "output funbody after replacement:~p~n", [ReplacedFun]),
   send_fun(M, F, Arity, ReplacedFun).
 
 %%------------------------------------------------------------------------------

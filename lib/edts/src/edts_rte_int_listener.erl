@@ -29,7 +29,6 @@
 
 %% Debugger API
 -export([ continue/0
-        , get_breakpoints/0
         , interpret_modules/1
         , interpret_node/1
         , is_node_interpreted/0
@@ -40,10 +39,9 @@
         , step/0
         , step_out/0
         , stop_debug/0
-        , toggle_breakpoint/2
         , uninterpret_modules/1
         , uninterpret_node/0
-        , wait_for_debugger/0]).
+        ]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
@@ -94,19 +92,6 @@ maybe_attach(Pid) ->
 
 %%------------------------------------------------------------------------------
 %% @doc
-%% Get all breakpoints and their status in the current interpreter
-%% @end
--spec get_breakpoints() -> [{ { Module :: module()
-                              , Line   :: non_neg_integer()
-                              }
-                            , Options  :: [term()]
-                            }].
-%%------------------------------------------------------------------------------
-get_breakpoints() ->
-  gen_server:call(?SERVER, get_breakpoints).
-
-%%------------------------------------------------------------------------------
-%% @doc
 %% Make Modules interpretable. Returns the list of modules which were
 %% interpretable and set as such.
 %% @end
@@ -148,17 +133,6 @@ is_module_interpreted(Module) ->
 %% @doc
 %% Toggles a breakpoint at Module:Line.
 %% @end
--spec toggle_breakpoint(Module :: module(), Line :: non_neg_integer()) ->
-                           {ok, set, {Module, Line}}
-                         | {ok, unset, {Module, Line}}.
-%%------------------------------------------------------------------------------
-toggle_breakpoint(Module, Line) ->
-  gen_server:call(?SERVER, {toggle_breakpoint, Module, Line}).
-
-%%------------------------------------------------------------------------------
-%% @doc
-%% Toggles a breakpoint at Module:Line.
-%% @end
 -spec set_breakpoint(Module :: module(), Fun :: function(), Arity :: non_neg_integer()) ->
                         {error, function_not_found} | {ok, set, tuple()}.
 
@@ -183,16 +157,6 @@ uninterpret_modules(Modules) ->
 %%------------------------------------------------------------------------------
 uninterpret_node() ->
   uninterpret_modules(int:interpreted()).
-
-%%------------------------------------------------------------------------------
-%% @doc
-%% Waits for debugging to be triggered by a breakpoint and returns
-%% relevant module and line information.
-%% @end
--spec wait_for_debugger() -> {ok, {module(), non_neg_integer()}}.
-%%------------------------------------------------------------------------------
-wait_for_debugger() ->
-  gen_server:call(?SERVER, wait_for_debugger, infinity).
 
 %%------------------------------------------------------------------------------
 %% @doc
@@ -298,15 +262,6 @@ handle_call({interpret, Modules}, _From, State) ->
                                  end, Modules)),
   {reply, Reply, State#dbg_state{interpretation = true}};
 
-handle_call({toggle_breakpoint, Module, Line}, _From, State) ->
-  Reply = case lists:keymember({Module, Line}, 1, int:all_breaks()) of
-            true  -> int:delete_break(Module, Line),
-                     {ok, unset, {Module, Line}};
-            false -> int:break(Module, Line),
-                     {ok, set, {Module, Line}}
-          end,
-  {reply, Reply, State};
-
 handle_call({set_breakpoint, Module, Fun, Arity}, _From, State) ->
   Reply = case int:break_in(Module, Fun, Arity) of
             ok    -> {ok, set, {Module, Fun, Arity}};
@@ -325,13 +280,6 @@ handle_call({is_interpreted, Module}, _From, State) ->
 handle_call(is_node_interpreted, _From,
             #dbg_state{interpretation = Value} = State) ->
   {reply, Value, State};
-
-handle_call(get_breakpoints, _From, State) ->
-  {reply, {ok, int:all_breaks()}, State};
-
-handle_call(wait_for_debugger, From, State) ->
-  Listeners = State#dbg_state.listeners,
-  {noreply, State#dbg_state{listeners = [From|Listeners]}};
 
 handle_call(_Cmd, _From, #dbg_state{proc = unattached} = State) ->
   {reply, {error, unattached}, State};
@@ -384,11 +332,11 @@ handle_cast(_Msg, State) ->
                                       {stop, Reason::atom(), state()}.
 %%------------------------------------------------------------------------------
 %% Hit a breakpoint
-handle_info({Meta, {break_at, Module, Line, Cur}}, State) ->
+handle_info({Meta, {break_at, Module, Line, Depth}}, State) ->
   Bindings = int:meta(Meta, bindings, nostack),
   File = int:file(Module),
-  notify({break, File, {Module, Line}, Cur, Bindings}),
-  edts_rte_server:send_binding({break_at, Bindings, Module, Line, Cur}),
+  notify({break, File, {Module, Line}, Depth, Bindings}),
+  edts_rte_server:send_binding({break_at, Bindings, Module, Line, Depth}),
   {noreply, State};
 
 %% Became idle (not executing any code under debugging)

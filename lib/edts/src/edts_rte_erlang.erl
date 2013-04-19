@@ -339,14 +339,14 @@ var_to_val_in_fun(FunBody, Bindings) ->
   %% Replace variable names with variables' value and
   %% combine the Token to function string again
   NewFunBody            = do_var_to_val_in_fun(AbsForm, Bindings),
-  io:format("New Body before flatten: ~p~n", [NewFunBody]),
+  %% io:format("New Body before flatten: ~p~n", [NewFunBody]),
   NewForm               = erl_pp:form(NewFunBody),
   lists:flatten(NewForm).
 
 %% @doc replace variable names with values for a function
 do_var_to_val_in_fun({function, L, FuncName, Arity, Clauses0}, Bindings) ->
   Clauses = replace_var_with_val_in_clauses(Clauses0, Bindings),
-  io:format("Replaced Clauses are:~p~n", [Clauses0]),
+  %% io:format("Replaced Clauses are:~p~n", [Clauses0]),
   {function, L, FuncName, Arity, Clauses}.
 
 %% @doc replace variable names with values in each of the function clauses
