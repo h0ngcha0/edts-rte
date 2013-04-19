@@ -191,20 +191,15 @@ handle_cast({send_binding, {break_at, Bindings, Module, Line, Depth}}, State) ->
   %% Only step into one more depth right now.
   case State#dbg_state.depth > Depth of
     true  ->
-      %% Sub function call is finished, output subfunction body
-      replace_fun_body_and_send(State#dbg_state.bindings, State#dbg_state.mfa),
       io:format( "in send_binding...:~n mfa:~p~nbinding:~p~nDepth:~p~n"
-                 , [State#dbg_state.mfa, State#dbg_state.bindings, Depth]);
+               , [State#dbg_state.mfa, State#dbg_state.bindings, Depth]),
+      %% Sub function call is finished, output subfunction body
+      replace_fun_body_and_send(State#dbg_state.bindings, State#dbg_state.mfa);
     false ->
-      State#dbg_state.mfa
+      do_nothing
   end,
 
-  MFA = case State#dbg_state.depth =/= Depth of
-          true  ->
-            edts_rte_erlang:get_mfa_from_line(Module, Line);
-          false ->
-            State#dbg_state.mfa
-        end,
+  MFA = new_mfa(State, Module, Line, Depth),
   io:format("old mfa:~p~n", [State#dbg_state.mfa]),
   io:format("new mfa:~p~n", [MFA]),
   edts_rte_int_listener:step(),
@@ -257,6 +252,14 @@ code_change(_OldVsn, State, _Extra) ->
   {ok, State}.
 
 %%%_* Internal =================================================================
+new_mfa(State, Module, Line, Depth) ->
+  case State#dbg_state.depth =/= Depth of
+    true  ->
+      edts_rte_erlang:get_mfa_from_line(Module, Line);
+    false ->
+      State#dbg_state.mfa
+  end.
+
 send_fun(M, F, Arity, FunBody) ->
   lists:foreach(fun(Fun) ->
                     Fun(M, F, Arity, FunBody)
