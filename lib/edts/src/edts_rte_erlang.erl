@@ -76,7 +76,7 @@ get_mfa_from_line(M, L0) ->
 find_function(L, [])                     ->
   [];
 find_function(L, [[L0, F, A] = LFA | T]) ->
-  case L > L0 of
+  case L >= L0 of
     true  -> LFA;
     false -> find_function(L, T)
   end.
