@@ -130,6 +130,7 @@ Must be preceded by `erlang-font-lock-keywords-macros' to work properly.")
   (edts-ensure-server-started)
   (ad-activate-regexp "edts-face.*")
   (add-hook 'after-save-hook 'edts-code-compile-and-display t t)
+  (add-hook 'after-save-hook 'edts-rte-run t t)
 
   ;; Auto-activate erlang mode for some additional extensions.
   (mapcar

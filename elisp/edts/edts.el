@@ -415,7 +415,7 @@ associated with that buffer."
       (eproject-attribute :node-sname)
     ('error (edts-shell-node-name))))
 
-(defun edts-rte-run (arguments)
+(defun edts-rte-run-with-args (arguments)
   "Run on function using rte_run"
   (interactive "sInput Arguments:")
   (let* ((resource   (list "debugger" (edts-buffer-node-name) "cmd"))
@@ -425,6 +425,17 @@ associated with that buffer."
          (body       (get_rte_run_body module fun arguments)))
     (edts-rest-post resource args body)
     ))
+
+(defun edts-rte-run ()
+  (interactive)
+  (if (file-string "/tmp/params")
+      (edts-rte-run-with-args (file-string "/tmp/params"))))
+
+ (defun file-string (file)
+    "Read the contents of a file and return as a string."
+    (with-temp-buffer
+      (insert-file-contents file)
+      (buffer-string)))
 
 (defun get_rte_run_body(module function args)
   "Get the json body for rte_run rest request"
@@ -453,4 +464,3 @@ associated with that buffer."
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Unit tests
-
