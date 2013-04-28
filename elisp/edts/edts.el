@@ -418,18 +418,37 @@ associated with that buffer."
 (defun edts-rte-run-with-args (arguments)
   "Run on function using rte_run"
   (interactive "sInput Arguments:")
-  (let* ((resource   (list "debugger" (edts-buffer-node-name) "cmd"))
+  (let* ((node       (edts-buffer-node-name))
+         (resource   (list "debugger" node "cmd"))
          (args       nil)
          (module     (car (find-mfa-under-point)))
          (fun        (cadr (find-mfa-under-point)))
          (body       (get_rte_run_body module fun arguments)))
+    (ensure-args-saved node arguments)
     (edts-rest-post resource args body)
     ))
+
+(defun ensure-args-saved (node args)
+  (let* ((node           (edts-buffer-node-name))
+         (module         (car   (find-mfa-under-point)))
+         (fun            (cadr  (find-mfa-under-point)))
+         (arity          (caddr (find-mfa-under-point)))
+         (param-buffer   (concat "*" node "-" "params" "*")))
+    (save-excursion
+      (set-buffer (get-buffer-create param-buffer))
+      (erase-buffer)
+      (insert (concat "module: " module "\n"
+                      "fun: "    fun    "/"  (number-to-string arity) "\n"
+                      "args: "   args   "\n"
+                      )))
+  ))
 
 (defun edts-rte-run ()
   (interactive)
   (if (file-string "/tmp/params")
-      (edts-rte-run-with-args (file-string "/tmp/params"))))
+      (edts-rte-run-with-args (file-string "/tmp/params"))
+    (edts-rte-run-with-args)
+    ))
 
  (defun file-string (file)
     "Read the contents of a file and return as a string."
