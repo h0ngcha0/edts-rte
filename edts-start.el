@@ -18,6 +18,7 @@
         '("auto-complete"
           "auto-highlight-symbol-mode"
           "edts"
+          "edts-rte"
           "eproject"
           "ert"
           "path-util"
