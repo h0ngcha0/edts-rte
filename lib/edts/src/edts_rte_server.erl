@@ -290,7 +290,8 @@ content_type() ->
   "application/json".
 
 mk_editor(Id, FunBody) ->
-  "{\"x\":74,\"y\":92,\"z\":1,\"id\":\""++Id++"\",\"code\":\""++FunBody++"\"}".
+ lists:flatten( io_lib:format( "{\"x\":74,\"y\":92,\"z\":1,\"id\":~p,\"code\":~p}"
+                             , [Id, FunBody])).
 
 %%%_* Unit tests ===============================================================
 
