@@ -424,7 +424,7 @@ associated with that buffer."
          (module     (car (find-mfa-under-point)))
          (fun        (cadr (find-mfa-under-point)))
          (body       (get_rte_run_body module fun arguments)))
-    (ensure-args-saved node arguments)
+    (ensure-args-saved arguments)
     (edts-rest-post resource args body)
     ))
 
@@ -436,14 +436,14 @@ associated with that buffer."
 (defun ensure-args-saved (args)
   (let* ((module         (car   (find-mfa-under-point)))
          (fun            (cadr  (find-mfa-under-point)))
-         (arity          (caddr (find-mfa-under-point)))
+         (arity          (caddr (find-mfa-under-point))))
     (save-excursion
       (set-buffer (get-buffer-create (param-buffer)))
       (erase-buffer)
       (insert (concat "module: " module                    "\n"
                       "fun: "    (fun-arity-str fun arity) "\n"
                       "args: "   args                      "\n"
-                      ))))))
+                      )))))
 
 (defun fun-arity-str (fun arity)
   (concat fun "/" (number-to-string arity)))
@@ -454,27 +454,28 @@ associated with that buffer."
          (fun            (cadr  (find-mfa-under-point)))
          (arity          (caddr (find-mfa-under-point))))
     (if (get-buffer (param-buffer))
-        (save-excursion
-          (set-buffer (param-buffer))
-          (let* ((mfa            (parse-mfa (buffer-string)))
+          (let* ((mfa            (parse-mfa))
                  (module-buffer  (car mfa))
+                 (node           (edts-buffer-node-name))
                  (fun-buffer     (cadr mfa))
                  (args-buffer    (caddr mfa)))
             (if (and (string-equal module module-buffer)
                      (string-equal (fun-arity-str fun arity) fun-buffer))
-                (edts-rte-run-with-args args-buffer)))))))
+                (edts-rte-run-with-args args-buffer))))))
 
-(defun parse-mfa (string)
-  (let* ((mfa    (split-string (trim-string string) "\n"))
-         (module (trim-string (car mfa)))
-         (fun    (trim-string (cadr mfa)))
-         (args   (trim-string (caddr mfa))))
-    (mapcar (lambda (str)
-              (print str)
-              (trim-string
-               (cadr
-                (split-string (trim-string str) ":"))))
-            (list module fun args))))
+(defun parse-mfa ()
+  (save-excursion
+    (set-buffer (param-buffer))
+    (let* ((mfa    (split-string (trim-string (buffer-string)) "\n"))
+           (module (trim-string (car mfa)))
+           (fun    (trim-string (cadr mfa)))
+           (args   (trim-string (caddr mfa))))
+      (mapcar (lambda (str)
+                (print str)
+                (trim-string
+                 (cadr
+                  (split-string (trim-string str) ":"))))
+              (list module fun args)))))
 
 (defun trim-string (string)
   "Remove white spaces in beginning and ending of STRING.
