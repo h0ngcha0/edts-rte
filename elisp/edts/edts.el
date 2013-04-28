@@ -415,16 +415,80 @@ associated with that buffer."
       (eproject-attribute :node-sname)
     ('error (edts-shell-node-name))))
 
-(defun edts-rte-run (arguments)
+;; rte related start
+
+(defun edts-rte-run ()
+  (interactive)
+  (let* ((module         (car   (find-mfa-under-point)))
+         (fun            (cadr  (find-mfa-under-point)))
+         (arity          (caddr (find-mfa-under-point))))
+    (if (get-buffer (param-buffer))
+          (let* ((mfa            (parse-mfa))
+                 (module-buffer  (car mfa))
+                 (node           (edts-buffer-node-name))
+                 (fun-buffer     (cadr mfa))
+                 (args-buffer    (caddr mfa)))
+            (if (and (string-equal module module-buffer)
+                     (string-equal (fun-arity-str fun arity) fun-buffer))
+                (edts-rte-run-with-args args-buffer))))))
+
+(defun edts-rte-run-with-args (arguments)
   "Run on function using rte_run"
   (interactive "sInput Arguments:")
-  (let* ((resource   (list "debugger" (edts-buffer-node-name) "cmd"))
+  (let* ((node       (edts-buffer-node-name))
+         (resource   (list "debugger" node "cmd"))
          (args       nil)
          (module     (car (find-mfa-under-point)))
          (fun        (cadr (find-mfa-under-point)))
          (body       (get_rte_run_body module fun arguments)))
+    (ensure-args-saved arguments)
     (edts-rest-post resource args body)
     ))
+
+(defun param-buffer ()
+  "Return the name of the parameter buffer for the current node"
+  (let* ((node (edts-buffer-node-name)))
+    (concat "*" node "-" "params" "*")
+    ))
+
+(defun ensure-args-saved (args)
+  "Ensure that the module function and arguments are saved in
+   the parameter buffer"
+  (let* ((module         (car   (find-mfa-under-point)))
+         (fun            (cadr  (find-mfa-under-point)))
+         (arity          (caddr (find-mfa-under-point))))
+    (save-excursion
+      (set-buffer (get-buffer-create (param-buffer)))
+      (erase-buffer)
+      (insert (concat "module: " module                    "\n"
+                      "fun: "    (fun-arity-str fun arity) "\n"
+                      "args: "   args                      "\n"
+                      )))))
+
+(defun fun-arity-str (fun arity)
+  "Return the func/arity string"
+  (concat fun "/" (number-to-string arity)))
+
+(defun parse-mfa ()
+  "Parse the module function args"
+  (save-excursion
+    (set-buffer (param-buffer))
+    (let* ((mfa    (split-string (trim-string (buffer-string)) "\n"))
+           (module (trim-string (car mfa)))
+           (fun    (trim-string (cadr mfa)))
+           (args   (trim-string (caddr mfa))))
+      (mapcar (lambda (str)
+                (print str)
+                (trim-string
+                 (cadr
+                  (split-string (trim-string str) ":"))))
+              (list module fun args)))))
+
+(defun trim-string (string)
+  "Remove white spaces in beginning and ending of STRING.
+White space here is any of: space, tab, emacs newline (line feed, ASCII 10)."
+(replace-regexp-in-string "\\`[ \t\n]*" "" (replace-regexp-in-string "[ \t\n]*\\'" "" string))
+)
 
 (defun get_rte_run_body(module function args)
   "Get the json body for rte_run rest request"
@@ -451,6 +515,7 @@ associated with that buffer."
       (insert string)
       (erlang-mode))))
 
+;; rte related end
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Unit tests
-
