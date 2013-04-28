@@ -428,27 +428,59 @@ associated with that buffer."
     (edts-rest-post resource args body)
     ))
 
-(defun ensure-args-saved (node args)
-  (let* ((node           (edts-buffer-node-name))
-         (module         (car   (find-mfa-under-point)))
+(defun param-buffer ()
+  (let* ((node (edts-buffer-node-name)))
+    (concat "*" node "-" "params" "*")
+    ))
+
+(defun ensure-args-saved (args)
+  (let* ((module         (car   (find-mfa-under-point)))
          (fun            (cadr  (find-mfa-under-point)))
          (arity          (caddr (find-mfa-under-point)))
-         (param-buffer   (concat "*" node "-" "params" "*")))
     (save-excursion
-      (set-buffer (get-buffer-create param-buffer))
+      (set-buffer (get-buffer-create (param-buffer)))
       (erase-buffer)
-      (insert (concat "module: " module "\n"
-                      "fun: "    fun    "/"  (number-to-string arity) "\n"
-                      "args: "   args   "\n"
-                      )))
-  ))
+      (insert (concat "module: " module                    "\n"
+                      "fun: "    (fun-arity-str fun arity) "\n"
+                      "args: "   args                      "\n"
+                      ))))))
+
+(defun fun-arity-str (fun arity)
+  (concat fun "/" (number-to-string arity)))
 
 (defun edts-rte-run ()
   (interactive)
-  (if (file-string "/tmp/params")
-      (edts-rte-run-with-args (file-string "/tmp/params"))
-    (edts-rte-run-with-args)
-    ))
+  (let* ((module         (car   (find-mfa-under-point)))
+         (fun            (cadr  (find-mfa-under-point)))
+         (arity          (caddr (find-mfa-under-point))))
+    (if (get-buffer (param-buffer))
+        (save-excursion
+          (set-buffer (param-buffer))
+          (let* ((mfa            (parse-mfa (buffer-string)))
+                 (module-buffer  (car mfa))
+                 (fun-buffer     (cadr mfa))
+                 (args-buffer    (caddr mfa)))
+            (if (and (string-equal module module-buffer)
+                     (string-equal (fun-arity-str fun arity) fun-buffer))
+                (edts-rte-run-with-args args-buffer)))))))
+
+(defun parse-mfa (string)
+  (let* ((mfa    (split-string (trim-string string) "\n"))
+         (module (trim-string (car mfa)))
+         (fun    (trim-string (cadr mfa)))
+         (args   (trim-string (caddr mfa))))
+    (mapcar (lambda (str)
+              (print str)
+              (trim-string
+               (cadr
+                (split-string (trim-string str) ":"))))
+            (list module fun args))))
+
+(defun trim-string (string)
+  "Remove white spaces in beginning and ending of STRING.
+White space here is any of: space, tab, emacs newline (line feed, ASCII 10)."
+(replace-regexp-in-string "\\`[ \t\n]*" "" (replace-regexp-in-string "[ \t\n]*\\'" "" string))
+)
 
  (defun file-string (file)
     "Read the contents of a file and return as a string."
