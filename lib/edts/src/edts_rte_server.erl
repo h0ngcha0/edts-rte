@@ -61,6 +61,7 @@
                    , record_table = undefined
                    , depth        = 0          :: non_neg_integer()
                    , line         = undefined  :: non_neg_integer() | undefined
+                   , mfa_form_map = undefined  :: dict()
                    }).
 
 %%%_* Types ====================================================================
@@ -151,9 +152,13 @@ handle_call({rte_run, Module, Fun, Args0}, _From, State) ->
   io:format("rte_run: after setbreakpoint~n"),
   Pid      = erlang:spawn(Module, Fun, ArgsTerm),
   io:format("called function pid:~p~n", [Pid]),
-  {reply, {ok, finished}, State#dbg_state{ proc = Pid
-                                         , bindings = []
-                                         , mfa = {Module, Fun, Arity}}}.
+  {reply, {ok, finished}, State#dbg_state{ proc         = Pid
+                                         , bindings     = []
+                                         , mfa          = {Module, Fun, Arity}
+                                         , line         = undefined
+                                         , depth        = 0
+                                         , mfa_form_map = dict:new()
+                                         }}.
 
 %%------------------------------------------------------------------------------
 %% @private
@@ -163,7 +168,7 @@ handle_call({rte_run, Module, Fun, Args0}, _From, State) ->
 -spec handle_info(term(), state()) -> {noreply, state()} |
                                       {noreply, state(), Timeout::timeout()} |
                                       {stop, Reason::atom(), state()}.
-handle_info(Msg, _State) ->
+handle_info(_Msg, _State) ->
   %%io:format("in handle_info ...., break_at, Msg:~p~n", [Msg]),
   {noreply, _State}.
 
@@ -187,6 +192,9 @@ handle_cast({send_binding, {break_at, Bindings, Module, Line, Depth}}, State) ->
            , [State#dbg_state.depth, Depth]),
   io:format("send_binding......Line:~p, Bindings:~p~n",[Line, Bindings]),
 
+  NewMFAFormMap = update_mfa_form_map( State#dbg_state.mfa_form_map
+                                     , Module, Line),
+
   %% get mfa and add one level if it is not main function
   %% output sub function body when the process leaves it.
   %% Only step into one more depth right now.
@@ -209,7 +217,8 @@ handle_cast({send_binding, {break_at, Bindings, Module, Line, Depth}}, State) ->
 
   %% save current bindings for further use
   {noreply, State#dbg_state{ bindings = Bindings, mfa = MFA
-                           , depth = Depth, line = Line}};
+                           , depth = Depth, line = Line
+                           , mfa_form_map = NewMFAFormMap }};
 
 handle_cast(exit, #dbg_state{bindings = Bindings} = State) ->
   io:format( "in exit...:~n mfa:~p~nbinding:~p~n"
@@ -218,21 +227,17 @@ handle_cast(exit, #dbg_state{bindings = Bindings} = State) ->
                            , State#dbg_state.line),
   {noreply, State};
 handle_cast(_Msg, State) ->
-  {noreply, State};
-handle_cast(_Msg, State) ->
   {noreply, State}.
 
 replace_fun_body_and_send(Bindings, MFA, LastLine) ->
   %% get function body
   {M, F, Arity}  = MFA,
-  {ok, StartLine, Body} = edts_code:get_function_body(M, F, Arity),
+  {ok, FunAbsForm} = edts_code:get_function_body(M, F, Arity),
+  {function, StartLine, _F, _A, _C} = FunAbsForm,
   io:format("startline:~p, lastline:~p~n", [StartLine, LastLine]),
-  %% calculate the relative line number from the beginning of the function
-  RelLine = (LastLine - StartLine + 1),
-  %% io:format( "output FunBody, Bindings before replace:~p~n", [Body]),
-  %% io:format( "Bindings:~n~p~n", [Bindings]),
   %% replace function body with bindings
-  ReplacedFun = edts_rte_erlang:var_to_val_in_fun(Body, RelLine, Bindings),
+  ReplacedFun = edts_rte_erlang:var_to_val_in_fun( FunAbsForm
+                                                 , LastLine, Bindings),
   %% io:format( "output funbody after replacement:~p~n", [ReplacedFun]),
   send_fun(M, F, Arity, ReplacedFun).
 
@@ -289,7 +294,8 @@ make_emacsclient_cmd(Id, FunBody) ->
 
 send_fun_to_edts_web(M, F, Arity, FunBody) ->
   Id  = lists:flatten(io_lib:format("~p__~p__~p", [M, F, Arity])),
-  httpc:request(post, {url(), [], content_type(), mk_editor(Id, FunBody)}, [], []).
+  httpc:request(post, { url(), [], content_type()
+                      , mk_editor(Id, FunBody)}, [], []).
 
 url() ->
   "http://localhost:4587/rte/editors/".
@@ -300,6 +306,9 @@ content_type() ->
 mk_editor(Id, FunBody) ->
  lists:flatten( io_lib:format( "{\"x\":74,\"y\":92,\"z\":1,\"id\":~p,\"code\":~p}"
                              , [Id, FunBody])).
+
+update_mfa_form_map(_, _, _) ->
+  ok.
 
 %%%_* Unit tests ===============================================================
 

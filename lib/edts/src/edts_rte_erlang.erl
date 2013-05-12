@@ -330,17 +330,13 @@ prep_rec([E | Es]) -> [prep_rec(E) | prep_rec(Es)];
 prep_rec(E) -> E.
 
 %% @doc replace the temporary variables with the actual value in a function
--spec var_to_val_in_fun( FunBody      :: string()
-                       , RelativeLine :: integer()
-                       , Bindings     :: edts_rte_server:binding()) -> string().
-var_to_val_in_fun(FunBody, RelativeLine, Bindings) ->
-  %% Parse function body to AbsForm
-  {ok, FunBodyToken, _} = erl_scan:string(FunBody),
-  {ok, AbsForm}         = erl_parse:parse_form(FunBodyToken),
-  io:format("AbsForm:~p~n", [AbsForm]),
+-spec var_to_val_in_fun( FunBody  :: string()
+                       , LastLine :: integer()
+                       , Bindings :: edts_rte_server:binding()) -> string().
+var_to_val_in_fun(AbsForm, LastLine, Bindings) ->
   %% Replace variable names with variables' value and
   %% combine the Token to function string again
-  NewFunBody            = do_var_to_val_in_fun(AbsForm, RelativeLine, Bindings),
+  NewFunBody            = do_var_to_val_in_fun(AbsForm, LastLine, Bindings),
   %% io:format("New Body before flatten: ~p~n", [NewFunBody]),
   NewForm               = erl_pp:form(NewFunBody),
   lists:flatten(NewForm).
@@ -425,6 +421,9 @@ replace_var_with_val_in_expr({match,L,LExpr0,RExpr0}, Bindings)           ->
   {match,L,LExpr,RExpr};
 replace_var_with_val_in_expr({var, _, _} = VarExpr, Bindings)             ->
   replace_var_with_val(VarExpr, Bindings);
+replace_var_with_val_in_expr({op, L, Ops, Expr0}, Bindings)               ->
+  Expr = replace_var_with_val_in_expr(Expr0, Bindings),
+  {op, L, Ops, Expr};
 replace_var_with_val_in_expr({op, L, Ops, LExpr0, RExpr0}, Bindings)      ->
   LExpr = replace_var_with_val_in_expr(LExpr0, Bindings),
   RExpr = replace_var_with_val_in_expr(RExpr0, Bindings),

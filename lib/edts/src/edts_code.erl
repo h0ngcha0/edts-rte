@@ -586,12 +586,9 @@ get_function_body(M, F, A) ->
 %%      TODO: what's the type of AbstractCode?
 -spec get_fun_body( M :: module(), F :: function(), A :: integer()
                   , ModSrc :: string(), AbstractCode :: any()) ->
-                      {ok, integer(), string()} | {error, any()}.
+                      {ok, tuple()} | {error, any()}.
 get_fun_body(_M, F, A, _CurFile, [{function, L, F, A, _C} = Fun|_T]) ->
-  io:format("get_file_and_file:~p~n", [Fun]),
-  %% will give us the string representation of the function
-  FunctionBody = lists:flatten(erl_pp:form(Fun)),
-  {ok, L, FunctionBody};
+  {ok, Fun};
 get_fun_body(M, F, A, CurFile, [_H|T])                                ->
   get_fun_body(M, F, A, CurFile, T);
 get_fun_body(_M, _F, _A, _CurFile, [])                                ->
