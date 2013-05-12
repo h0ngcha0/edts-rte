@@ -28,7 +28,7 @@
 -export([ convert_list_to_term/2
         , expand_records/2
         , read_and_add_records/2
-        , var_to_val_in_fun/2
+        , var_to_val_in_fun/3
         , get_mfa_from_line/2
         ]).
 
@@ -36,7 +36,7 @@
 -include_lib("kernel/include/file.hrl").
 
 %%%_* API ======================================================================
-convert_list_to_term(Arguments, RT) ->
+convert_list_to_term(Arguments, _RT) ->
   io:format("args:~p~n", [Arguments]),
   %% N.B. this is very hackish. added a '.' because
   %%      erl_scan:string/1 requires full expression with dot
@@ -68,14 +68,14 @@ get_mfa_from_line(M, L0) ->
         [[Line, F, A] | AllFuns] end, [], FAs),
   SortedAllFuns = lists:reverse(lists:sort(AllFuns)),
   %% [Line, F, A]
-  [L, F, A] = find_function(L0, SortedAllFuns),
+  [_L, F, A] = find_function(L0, SortedAllFuns),
   {M, F, A}.
 
 %%%_* Internal =================================================================
 
-find_function(L, [])                     ->
+find_function(_L, [])                    ->
   [];
-find_function(L, [[L0, F, A] = LFA | T]) ->
+find_function(L, [[L0, _F, _A] = LFA | T]) ->
   case L >= L0 of
     true  -> LFA;
     false -> find_function(L, T)
@@ -330,24 +330,49 @@ prep_rec([E | Es]) -> [prep_rec(E) | prep_rec(Es)];
 prep_rec(E) -> E.
 
 %% @doc replace the temporary variables with the actual value in a function
--spec var_to_val_in_fun( FunBody  :: string()
-                       , Bindings :: edts_rte_server:binding()) -> string().
-var_to_val_in_fun(FunBody, Bindings) ->
+-spec var_to_val_in_fun( FunBody      :: string()
+                       , RelativeLine :: integer()
+                       , Bindings     :: edts_rte_server:binding()) -> string().
+var_to_val_in_fun(FunBody, RelativeLine, Bindings) ->
   %% Parse function body to AbsForm
   {ok, FunBodyToken, _} = erl_scan:string(FunBody),
   {ok, AbsForm}         = erl_parse:parse_form(FunBodyToken),
+  io:format("AbsForm:~p~n", [AbsForm]),
   %% Replace variable names with variables' value and
   %% combine the Token to function string again
-  NewFunBody            = do_var_to_val_in_fun(AbsForm, Bindings),
+  NewFunBody            = do_var_to_val_in_fun(AbsForm, RelativeLine, Bindings),
   %% io:format("New Body before flatten: ~p~n", [NewFunBody]),
   NewForm               = erl_pp:form(NewFunBody),
   lists:flatten(NewForm).
 
 %% @doc replace variable names with values for a function
-do_var_to_val_in_fun({function, L, FuncName, Arity, Clauses0}, Bindings) ->
-  Clauses = replace_var_with_val_in_clauses(Clauses0, Bindings),
+do_var_to_val_in_fun( {function, L, FuncName, Arity, Clauses0}
+                    , RelativeLine, Bindings) ->
+  Clauses = replace_var_with_val_in_fun_clauses( Clauses0, RelativeLine
+                                               , Bindings),
   %% io:format("Replaced Clauses are:~p~n", [Clauses0]),
   {function, L, FuncName, Arity, Clauses}.
+
+replace_var_with_val_in_fun_clauses(Clauses0, RelativeLine, Binding) ->
+  {Clauses1, OtherClauses} =
+    lists:splitwith(fun({clause,L,_ArgList0,_WhenList0,_Lines0}) ->
+                        L < RelativeLine
+                    end, Clauses0),
+  do_replace_var_with_val_in_clauses(Clauses1, Binding) ++ OtherClauses.
+
+do_replace_var_with_val_in_clauses([], _Binding)                            ->
+  [];
+do_replace_var_with_val_in_clauses( [{clause,L,ArgList0,WhenList0,Lines0}]
+                                  , Binding)                                ->
+  %% replace variables' name with values in argument list
+  ArgList  = replace_var_with_val_args(ArgList0, Binding),
+  %% replace variables' name with values in "when" list
+  WhenList = replace_var_with_val_args(WhenList0, Binding),
+  %% replace variables' name with values for each of the expressions
+  Lines    = replace_var_with_val_in_expr(Lines0, Binding),
+  [{clause,L,ArgList,WhenList,Lines}];
+do_replace_var_with_val_in_clauses([H|T], Binding)                          ->
+  [H|do_replace_var_with_val_in_clauses(T, Binding)].
 
 %% @doc replace variable names with values in each of the function clauses
 replace_var_with_val_in_clauses([], _Bindings)                         ->

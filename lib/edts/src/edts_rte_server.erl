@@ -183,7 +183,8 @@ handle_cast({finished_attach, Pid}, State) ->
   {noreply, State};
 
 handle_cast({send_binding, {break_at, Bindings, Module, Line, Depth}}, State) ->
-  io:format("send_binding......before step. old depth:~p , new_depth:~p~n", [State#dbg_state.depth, Depth]),
+  io:format( "send_binding......before step. old depth:~p , new_depth:~p~n"
+           , [State#dbg_state.depth, Depth]),
   io:format("send_binding......Line:~p, Bindings:~p~n",[Line, Bindings]),
 
   %% get mfa and add one level if it is not main function
@@ -194,7 +195,9 @@ handle_cast({send_binding, {break_at, Bindings, Module, Line, Depth}}, State) ->
       io:format( "in send_binding...:~n mfa:~p~nbinding:~p~nDepth:~p~n"
                , [State#dbg_state.mfa, State#dbg_state.bindings, Depth]),
       %% Sub function call is finished, output subfunction body
-      replace_fun_body_and_send(State#dbg_state.bindings, State#dbg_state.mfa);
+      replace_fun_body_and_send( State#dbg_state.bindings
+                               , State#dbg_state.mfa
+                               , State#dbg_state.line);
     false ->
       do_nothing
   end,
@@ -205,26 +208,31 @@ handle_cast({send_binding, {break_at, Bindings, Module, Line, Depth}}, State) ->
   edts_rte_int_listener:step(),
 
   %% save current bindings for further use
-  {noreply, State#dbg_state{bindings = Bindings, mfa = MFA, depth = Depth, line = Line}};
+  {noreply, State#dbg_state{ bindings = Bindings, mfa = MFA
+                           , depth = Depth, line = Line}};
 
 handle_cast(exit, #dbg_state{bindings = Bindings} = State) ->
   io:format( "in exit...:~n mfa:~p~nbinding:~p~n"
            , [State#dbg_state.mfa, Bindings]),
-  replace_fun_body_and_send(Bindings, State#dbg_state.mfa),
+  replace_fun_body_and_send( Bindings, State#dbg_state.mfa
+                           , State#dbg_state.line),
   {noreply, State};
 handle_cast(_Msg, State) ->
   {noreply, State};
 handle_cast(_Msg, State) ->
   {noreply, State}.
 
-replace_fun_body_and_send(Bindings, MFA) ->
+replace_fun_body_and_send(Bindings, MFA, LastLine) ->
   %% get function body
   {M, F, Arity}  = MFA,
-  {ok, Body} = edts_code:get_function_body(M, F, Arity),
+  {ok, StartLine, Body} = edts_code:get_function_body(M, F, Arity),
+  io:format("startline:~p, lastline:~p~n", [StartLine, LastLine]),
+  %% calculate the relative line number from the beginning of the function
+  RelLine = (LastLine - StartLine + 1),
   %% io:format( "output FunBody, Bindings before replace:~p~n", [Body]),
   %% io:format( "Bindings:~n~p~n", [Bindings]),
   %% replace function body with bindings
-  ReplacedFun = edts_rte_erlang:var_to_val_in_fun(Body, Bindings),
+  ReplacedFun = edts_rte_erlang:var_to_val_in_fun(Body, RelLine, Bindings),
   %% io:format( "output funbody after replacement:~p~n", [ReplacedFun]),
   send_fun(M, F, Arity, ReplacedFun).
 
