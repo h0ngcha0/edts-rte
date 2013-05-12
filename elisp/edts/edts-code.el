@@ -29,6 +29,7 @@
 (defvar edts-code-after-compilation-hook
   '(edts-code-eunit
     edts-code-xref-analyze-related
+    edts-rte
     edts-code-dialyze-related-hook-fun)
   "Hooks to run after compilation finishes.")
 
@@ -123,6 +124,11 @@ current buffer's file."
        edts-code-xref-checks
        #'edts-code-handle-xref-analysis-result))))
 
+(defun edts-rte (result)
+  "Execute the edts-rte-run function when there is no error in
+the file"
+  (when (not (eq result 'error))
+    (edts-rte-run)))
 
 (defun edts-code-xref-analyze-no-project ()
   "Runs xref-checks for all live buffers with its file in current
