@@ -368,11 +368,13 @@ replace_var_with_val_args([VarExpr0|T], Bindings) ->
   VarExpr = replace_var_with_val(VarExpr0, Bindings),
   [VarExpr | replace_var_with_val_args(T, Bindings)].
 
+%% @doc replace the variable in a list of expressions with its actual valuex
 replace_var_with_val_in_exprs(Exprs, Bindings) ->
   lists:map(fun(Expr) ->
                 replace_var_with_val_in_expr(Expr, Bindings)
             end, Exprs).
 
+%% @doc replace the variable in the expression with its actual valuex
 replace_var_with_val_in_expr([], _Bindings)                               ->
   [];
 replace_var_with_val_in_expr(Atom, _Bindings) when is_atom(Atom)          ->
@@ -398,38 +400,63 @@ replace_var_with_val_in_expr({match,L,LExpr0,RExpr0}, Bindings)           ->
   {match,L,LExpr,RExpr};
 replace_var_with_val_in_expr({var, _, _} = VarExpr, Bindings)             ->
   replace_var_with_val(VarExpr, Bindings);
-replace_var_with_val_in_expr({op, _, _, _, _} = OpsExpr, Bindings)        ->
-  replace_var_with_val_ops(OpsExpr, Bindings);
-replace_var_with_val_in_expr({call, L, {atom, L, F0}, ArgList0}, Bindings)->
+replace_var_with_val_in_expr({op, L, Ops, LExpr0, RExpr0}, Bindings)      ->
+  LExpr = replace_var_with_val_in_expr(LExpr0, Bindings),
+  RExpr = replace_var_with_val_in_expr(RExpr0, Bindings),
+  {op, L, Ops, LExpr, RExpr};
+replace_var_with_val_in_expr( {call, L, {atom, L, F0}, ArgList0}
+                            , Bindings)                                   ->
   F = replace_var_with_val_in_expr(F0, Bindings),
   {call, L, {atom, L, F}, replace_var_with_val_args(ArgList0, Bindings)};
-replace_var_with_val_in_expr({call, L, {remote, L, M0, F0}, Args0}, Bindings) ->
+replace_var_with_val_in_expr( {call, L, {remote, L, M0, F0}, Args0}
+                            , Bindings)                                   ->
   M = replace_var_with_val_in_expr(M0, Bindings),
   F = replace_var_with_val_in_expr(F0, Bindings),
   {call, L, {remote, L, M, F}, replace_var_with_val_args(Args0, Bindings)};
-replace_var_with_val_in_expr({'case', L, CaseExpr0, Clauses0}, Bindings)  ->
+replace_var_with_val_in_expr( {'case', L, CaseExpr0, Clauses0}
+                            , Bindings)                                   ->
   CaseExpr = replace_var_with_val_in_expr(CaseExpr0, Bindings),
   Clauses  = replace_var_with_val_in_clauses(Clauses0, Bindings),
   {'case', L, CaseExpr, Clauses};
-replace_var_with_val_in_expr({string, _L, _Str} = String, _Bindings)      ->
+replace_var_with_val_in_expr( {string, _L, _Str} = String
+                            , _Bindings)                                  ->
   String;
-replace_var_with_val_in_expr({'receive', L, Clauses0}, Bindings)        ->
+replace_var_with_val_in_expr( { 'try', L, Exprs0, PatternClauses0
+                              , ExceptionClauses0, FinalExprs0}
+                            , Bindings)                                   ->
+  Exprs            = replace_var_with_val_in_exprs(Exprs0, Bindings),
+  PatternClauses   = replace_var_with_val_in_clauses( PatternClauses0
+                                                    , Bindings),
+  ExceptionClauses = replace_var_with_val_in_clauses( ExceptionClauses0
+                                                    , Bindings),
+  FinalExprs       = replace_var_with_val_in_exprs( FinalExprs0
+                                                  , Bindings),
+  {'try', L, Exprs, PatternClauses, ExceptionClauses, FinalExprs};
+replace_var_with_val_in_expr({lc, L, Expr0, GenExprs0}, Bindings)         ->
+  Expr     = replace_var_with_val_in_expr(Expr0, Bindings),
+  GenExprs = replace_var_with_val_in_exprs(GenExprs0, Bindings),
+  {lc, L, Expr, GenExprs};
+replace_var_with_val_in_expr({generate, L, ResExp, GenExp}, Bindings)     ->
+  { generate, L, replace_var_with_val_in_expr(ResExp, Bindings)
+  , replace_var_with_val_in_expr(GenExp, Bindings)};
+replace_var_with_val_in_expr({'receive', L, Clauses0}, Bindings)          ->
   Clauses  = replace_var_with_val_in_clauses(Clauses0, Bindings),
   {'receive', L, Clauses};
-replace_var_with_val_in_expr({'receive', L, Clauses0, Int, Exprs0}, Bindings)        ->
+replace_var_with_val_in_expr( {'receive', L, Clauses0, Int, Exprs0}
+                            , Bindings)                                   ->
   Clauses  = replace_var_with_val_in_clauses(Clauses0, Bindings),
   Expr     = replace_var_with_val_in_exprs(Exprs0, Bindings),
   {'receive', L, Clauses, Int, Expr};
-replace_var_with_val_in_expr({record, _, _Name, _Fields} = Record, _Bindings)  ->
-  edts_rte_erlang:expand_records(edts_rte_server:record_table_name(), Record);
+replace_var_with_val_in_expr( {record, _, _Name, _Fields} = Record
+                            , _Bindings)                                  ->
+  edts_rte_erlang:expand_records( edts_rte_server:record_table_name()
+                                , Record);
 replace_var_with_val_in_expr([Statement0|T], Bindings)                    ->
   Statement = replace_var_with_val_in_expr(Statement0, Bindings),
-  [Statement | replace_var_with_val_in_expr(T, Bindings)].
-
-replace_var_with_val_ops({op, L, Ops, LExpr0, RExpr0}, Bindings)  ->
-  LExpr = replace_var_with_val_in_expr(LExpr0, Bindings),
-  RExpr = replace_var_with_val_in_expr(RExpr0, Bindings),
-  {op, L, Ops, LExpr, RExpr}.
+  [Statement | replace_var_with_val_in_expr(T, Bindings)];
+replace_var_with_val_in_expr(Var, _Bindings)                              ->
+  io:format("Var:~p~n", [Var]),
+  error(crap).
 
 replace_var_with_val({var, L, VariableName}, Bindings) ->
   Value = proplists:get_value(VariableName, Bindings),
@@ -443,11 +470,8 @@ replace_var_with_val(Other, _Bindings)                 ->
 do_replace(Value, L) ->
   ValStr           = lists:flatten(io_lib:format("~p.", [Value])),
   Tokens0          = get_tokens(ValStr),
-  io:format("Tokens0:~p~n", [Tokens0]),
   Tokens           = maybe_replace_pid(Tokens0, Value),
-  io:format("Tokens:~p~n", [Tokens]),
   {ok, [ValForm]}  = erl_parse:parse_exprs(Tokens),
-  io:format("ValForm:~p~n", [ValForm]),
   replace_line_num(ValForm, L).
 
 get_tokens(ValStr) ->
