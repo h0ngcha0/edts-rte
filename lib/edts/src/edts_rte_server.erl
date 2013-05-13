@@ -237,15 +237,14 @@ handle_cast(_Msg, State) ->
   {noreply, State}.
 
 replace_fun_body(Bindings, MFA, MFAFormMap) ->
-  io:format("dict 1~n"),
-  {FunAbsForm, _AllClausesLn, ExecClausesLn} = dict:fetch(MFA, MFAFormMap),
-  io:format("ExecClausesLn:~p~n", [ExecClausesLn]),
-  edts_rte_erlang:var_to_val_in_fun(FunAbsForm, ExecClausesLn, Bindings).
+  {FunAbsForm, AllClausesLn, _ExecClausesLn} = dict:fetch(MFA, MFAFormMap),
+  io:format("AllClausesLn:~p~n", [AllClausesLn]),
+  io:format("_ExecClausesLn:~p~n", [_ExecClausesLn]),
+  io:format("FunAbsForm:~p~n", [FunAbsForm]),
+  edts_rte_erlang:var_to_val_in_fun(FunAbsForm, AllClausesLn, Bindings).
 
 cleanup_exec_clauses_linum(MFA, MFAFormMap) ->
-  io:format("dict 2~n"),
   {FunAbsForm, AllClausesLn, ExecClausesLn} = dict:fetch(MFA, MFAFormMap),
-  io:format("dict 7~n"),
   dict:store(MFA, {FunAbsForm, AllClausesLn, []}, MFAFormMap).
 
 %%------------------------------------------------------------------------------
@@ -315,25 +314,28 @@ mk_editor(Id, FunBody) ->
                   "{\"x\":74,\"y\":92,\"z\":1,\"id\":~p,\"code\":~p}"
                , [Id, FunBody])).
 
+%% if the clauses are unfortunately programmed in the same line
+%% then rte shall feel confused and refuse to display any value of
+%% the variables.
 update_mfa_form_map(MFAFormMap, {M, F, A} = MFA, Line) ->
-  io:format("dict 6~n"),
   case dict:is_key({M, F, A}, MFAFormMap) of
     true  ->
-      io:format("dict 5~n"),
+      io:format("Line 1:~p~n", [Line]),
       {FunAbsForm, AllClausesLn, ExecClausesLn} =
         dict:fetch({M, F, A}, MFAFormMap),
-      case lists:member(Line, AllClausesLn) of
-        true  ->   io:format("dict 4~n"),
-                   dict:store( {M, F, A}
-                           , {FunAbsForm, AllClausesLn, [Line|ExecClausesLn]}
-                           , MFAFormMap);
-        false -> MFAFormMap
-      end;
+      %% try to touch the clause structs
+      NewAC = edts_rte_erlang:traverse_clause_struct(Line, AllClausesLn),
+      io:format("newac:~p~n", [NewAC]),
+      dict:store( {M, F, A}
+                , { FunAbsForm
+                  , NewAC
+                  , ExecClausesLn}
+                , MFAFormMap);
     false ->
+      io:format("Line 2:~p~n", [Line]),
       {ok, FunAbsForm} = edts_code:get_function_body(M, F, A),
       AllClausesLn     = edts_rte_erlang:extract_fun_clauses_line_num(
                            FunAbsForm),
-      io:format("dict 3~n"),
       dict:store({M, F, A}, {FunAbsForm, AllClausesLn, []}, MFAFormMap)
   end.
 

@@ -28,6 +28,7 @@
 -export([ convert_list_to_term/2
         , expand_records/2
         , extract_fun_clauses_line_num/1
+        , traverse_clause_struct/2
         , read_and_add_records/2
         , var_to_val_in_fun/3
         , get_mfa_from_line/2
@@ -35,6 +36,11 @@
 
 %%%_* Includes =================================================================
 -include_lib("kernel/include/file.hrl").
+
+-record(clause_struct, { line       = undefined :: integer()
+                       , sub_clause = undefined :: #clause_struct{}
+                       , touched    = false     :: boolean()
+                       }).
 
 %%%_* API ======================================================================
 convert_list_to_term(Arguments, _RT) ->
@@ -64,8 +70,9 @@ extract_fun_clauses_line_num({function, _L, _Func, _Arity, Clauses}) ->
 extract_clauses_line_num([]) ->
   [];
 extract_clauses_line_num([{clause,L,_ArgList0,_WhenList0,Exprs0}|T]) ->
-  Exprs = extract_exprs_line_num(Exprs0),
-  [L | Exprs ++ extract_clauses_line_num(T)].
+  ExprsLn = extract_exprs_line_num(Exprs0),
+  [ #clause_struct{line = L, sub_clause = lists:reverse(ExprsLn)}
+  | extract_clauses_line_num(T)].
 
 extract_exprs_line_num(Exprs) ->
   lists:foldl(fun(Expr, LineNums) ->
@@ -73,15 +80,73 @@ extract_exprs_line_num(Exprs) ->
               end, [], Exprs).
 
 extract_expr_line_num({'case', _L, _CaseExpr, Clauses})  ->
-  extract_clauses_line_num(Clauses);
+  [extract_clauses_line_num(Clauses)];
 extract_expr_line_num({ 'try', _L, _Exprs, PatternClauses
                         , ExceptionClauses, _FinalExprs}) ->
-  extract_clauses_line_num(PatternClauses) ++
-    extract_clauses_line_num(ExceptionClauses);
+  [extract_clauses_line_num(PatternClauses)] ++
+    [extract_clauses_line_num(ExceptionClauses)];
 extract_expr_line_num({'receive', _L, Clauses})          ->
-  extract_clauses_line_num(Clauses);
+  [extract_clauses_line_num(Clauses)];
 extract_expr_line_num(_)                                 ->
   [].
+
+%% @doc traverse all the clauses and mark all the touched node
+%%      if one of the clause in a group of clauses are touched,
+%%      do not touch the rest of the clause.
+traverse_clause_struct(_Line, []) ->
+  io:format("tcs, Line 1:~p~n", [_Line]),
+  [];
+traverse_clause_struct(Line, [H|_T] = ClausesGroups) when is_list(H) ->
+  SmallerLnF = fun(ClauseStructs) ->
+                   ClauseStruct = hd(ClauseStructs),
+                   ClauseStruct#clause_struct.line =< Line
+               end,
+  {SmallerLnClausesGroups, BiggerOrEqualLnClausesGroups} =
+    lists:splitwith(SmallerLnF, ClausesGroups),
+  io:format("tcs, sg:~p~n", [SmallerLnClausesGroups]),
+  io:format("tcs, bg:~p~n", [BiggerOrEqualLnClausesGroups]),
+  do_traverse_clause_group(SmallerLnClausesGroups, Line) ++
+    BiggerOrEqualLnClausesGroups;
+traverse_clause_struct(Line, ClauseStructs) ->
+  Touched =
+    lists:any(fun(ClauseStruct) ->
+                  ClauseStruct#clause_struct.touched
+              end, ClauseStructs),
+  SmallerLnF = fun(ClauseStruct) ->
+                   ClauseStruct#clause_struct.line =< Line
+               end,
+  {SmallerLnClauses, BiggerOrEqualLnClauses} =
+    lists:splitwith(SmallerLnF, ClauseStructs),
+  io:format("tcs, sc:~p~n", [SmallerLnClauses]),
+  io:format("tcs, bc:~p~n", [BiggerOrEqualLnClauses]),
+  do_traverse_clause_struct(SmallerLnClauses, Line, Touched) ++
+    BiggerOrEqualLnClauses.
+
+do_traverse_clause_group([], _Line) ->
+  [];
+do_traverse_clause_group(SmallerClassesGroup, Line) ->
+  Reversed = lists:reverse(SmallerClassesGroup),
+  lists:reverse([traverse_clause_struct(Line, hd(Reversed))|tl(Reversed)]).
+
+do_traverse_clause_struct([], _line, _Touched) ->
+  [];
+do_traverse_clause_struct(SmallerLnClauses, Line, Touched) ->
+  [ClauseStruct|T] = lists:reverse(SmallerLnClauses),
+  %% check if other clauses in the same group has been touched.
+  case Touched of
+    true  -> case ClauseStruct#clause_struct.touched of
+               true  -> lists:reverse([touch_clause(ClauseStruct, Line)|T]);
+               false -> SmallerLnClauses
+             end;
+    false -> lists:reverse([touch_clause(ClauseStruct, Line)|T])
+  end.
+
+touch_clause(ClauseStruct, Line) ->
+  SubClauseStruct0 = ClauseStruct#clause_struct.sub_clause,
+  SubClauseStruct  = traverse_clause_struct(Line, SubClauseStruct0),
+  ClauseStruct#clause_struct{ touched = true
+                            , sub_clause = SubClauseStruct}.
+
 
 read_and_add_records(Module, RT) ->
   read_and_add_records(Module, '_', [], [], RT).
@@ -358,14 +423,14 @@ prep_rec(E) -> E.
 
 %% @doc replace the temporary variables with the actual value in a function
 -spec var_to_val_in_fun( FunBody       :: string()
-                       , ExecClausesLn :: [integer()]
+                       , AllClausesLn  :: #clause_struct{}
                        , Bindings      :: edts_rte_server:binding())
                        -> string().
-var_to_val_in_fun(AbsForm, ExecClausesLn, Bindings) ->
+var_to_val_in_fun(AbsForm, AllClausesLn, Bindings) ->
   %% Replace variable names with variables' value and
   %% combine the Token to function string again
   NewFunBody            = do_var_to_val_in_fun( AbsForm
-                                              , ExecClausesLn
+                                              , AllClausesLn
                                               , Bindings),
   %% io:format("New Body before flatten: ~p~n", [NewFunBody]),
   NewForm               = erl_pp:form(NewFunBody),
@@ -373,33 +438,47 @@ var_to_val_in_fun(AbsForm, ExecClausesLn, Bindings) ->
 
 %% @doc replace variable names with values for a function
 do_var_to_val_in_fun( {function, L, FuncName, Arity, Clauses0}
-                    , ExecClausesLn, Bindings) ->
+                    , AllClausesLn, Bindings) ->
   Clauses = replace_var_with_val_in_clauses( Clauses0
-                                           , ExecClausesLn
+                                           , AllClausesLn
                                            , Bindings),
   %% io:format("Replaced Clauses are:~p~n", [Clauses0]),
   {function, L, FuncName, Arity, Clauses}.
 
 %% @doc replace variable names with values in each of the clauses
-replace_var_with_val_in_clauses(Clauses, ExecClausesLn, Binding) ->
+replace_var_with_val_in_clauses(Clauses, AllClausesLn, Binding) ->
   lists:map(fun({clause,L,_ArgList0,_WhenList0,_Lines0} = Clause) ->
-                case lists:member(L, ExecClausesLn) of
+                Touched = is_clause_touched(L, AllClausesLn),
+                io:format( "L:~p~nAc:~p~ntouched:~p~n"
+                         , [L, AllClausesLn, Touched]),
+                case is_clause_touched(L, AllClausesLn) of
                   true  -> do_replace_var_with_val_in_clause( Clause
-                                                            , ExecClausesLn
+                                                            , AllClausesLn
                                                             , Binding);
                   false -> Clause
                 end
             end, Clauses).
 
+is_clause_touched(L, [])                                  ->
+  false;
+is_clause_touched(L, [H|T]) when is_list(H)               ->
+  is_clause_touched(L, H) orelse is_clause_touched(L, T);
+is_clause_touched(L, [H|T]) when H#clause_struct.line > L ->
+  false;
+is_clause_touched(L, [H|T])                               ->
+  (H#clause_struct.line =:= L andalso H#clause_struct.touched)
+    orelse is_clause_touched(L, H#clause_struct.sub_clause)
+    orelse is_clause_touched(L, T).
+
 do_replace_var_with_val_in_clause( {clause,L,ArgList0,WhenList0,Lines0}
-                                 , ExecClausesLn
+                                 , AllClausesLn
                                  , Binding)                                ->
   %% replace variables' name with values in argument list
   ArgList  = replace_var_with_val_args(ArgList0, Binding),
   %% replace variables' name with values in "when" list
   WhenList = replace_var_with_val_args(WhenList0, Binding),
   %% replace variables' name with values for each of the expressions
-  Lines    = replace_var_with_val_in_expr(Lines0, ExecClausesLn, Binding),
+  Lines    = replace_var_with_val_in_expr(Lines0, AllClausesLn, Binding),
   {clause,L,ArgList,WhenList,Lines}.
 
 replace_var_with_val_args([], _Bindings)->[];
