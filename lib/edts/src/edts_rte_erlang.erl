@@ -27,23 +27,30 @@
 %%%_* Exports =================================================================
 -export([ convert_list_to_term/2
         , expand_records/2
+        , extract_fun_clauses_line_num/1
+        , traverse_clause_struct/2
         , read_and_add_records/2
-        , var_to_val_in_fun/2
+        , var_to_val_in_fun/3
         , get_mfa_from_line/2
         ]).
 
 %%%_* Includes =================================================================
 -include_lib("kernel/include/file.hrl").
 
+-record(clause_struct, { line       = undefined :: integer()
+                       , sub_clause = undefined :: #clause_struct{}
+                       , touched    = false     :: boolean()
+                       }).
+
 %%%_* API ======================================================================
-convert_list_to_term(Arguments, RT) ->
+convert_list_to_term(Arguments, _RT) ->
   io:format("args:~p~n", [Arguments]),
   %% N.B. this is very hackish. added a '.' because
   %%      erl_scan:string/1 requires full expression with dot
   {ok, Tokens,__Endline} = erl_scan:string(Arguments++"."),
   io:format("tokens:~p~n", [Tokens]),
   {ok, AbsForm0}         = erl_parse:parse_exprs(Tokens),
-  AbsForm                = replace_var_with_val_in_expr(AbsForm0, []),
+  AbsForm                = replace_var_with_val_in_expr(AbsForm0, [], []),
   io:format("absf:~p~n", [AbsForm0]),
   Val     = erl_eval:exprs( AbsForm
                           , erl_eval:new_bindings()),
@@ -55,6 +62,98 @@ convert_list_to_term(Arguments, RT) ->
 expand_records(RT, E0) ->
   UsedRecords = used_record_defs(E0, RT),
   do_expand_records(UsedRecords, E0).
+
+%% @doc Extract all the line numbers of all the clauses from an abstract form
+extract_fun_clauses_line_num({function, _L, _Func, _Arity, Clauses}) ->
+  extract_clauses_line_num(Clauses).
+
+extract_clauses_line_num([]) ->
+  [];
+extract_clauses_line_num([{clause,L,_ArgList0,_WhenList0,Exprs0}|T]) ->
+  ExprsLn = extract_exprs_line_num(Exprs0),
+  [ #clause_struct{line = L, sub_clause = lists:reverse(ExprsLn)}
+  | extract_clauses_line_num(T)].
+
+extract_exprs_line_num(Exprs) ->
+  lists:foldl(fun(Expr, LineNums) ->
+                extract_expr_line_num(Expr) ++ LineNums
+              end, [], Exprs).
+
+extract_expr_line_num({'case', _L, CaseExpr, Clauses})  ->
+  plc(Clauses) ++ ple(CaseExpr);
+extract_expr_line_num({ 'try', _L, Exprs, PatternClauses
+                      , ExceptionClauses, FinalExprs}) ->
+  ple(FinalExprs) ++ plc(ExceptionClauses) ++
+    plc(PatternClauses) ++ ple(Exprs);
+extract_expr_line_num({'receive', _L, Clauses})          ->
+  plc(Clauses);
+extract_expr_line_num(_)                                 ->
+  [].
+
+ple(Expr) ->
+  pl(Expr, fun extract_expr_line_num/1).
+
+plc(Clauses) ->
+  pl(Clauses, fun extract_clauses_line_num/1).
+
+pl(Expr, F) ->
+  case F(Expr) of
+    [] -> [];
+    E  -> [E]
+  end.
+
+%% @doc traverse all the clauses and mark all the touched node
+%%      if one of the clause in a group of clauses are touched,
+%%      do not touch the rest of the clause.
+traverse_clause_struct(_Line, []) ->
+  [];
+traverse_clause_struct(Line, [H|_T] = ClausesGroups) when is_list(H) ->
+  SmallerLnF = fun(ClauseStructs) ->
+                   ClauseStruct = hd(ClauseStructs),
+                   ClauseStruct#clause_struct.line =< Line
+               end,
+  {SmallerLnClausesGroups, BiggerOrEqualLnClausesGroups} =
+    lists:splitwith(SmallerLnF, ClausesGroups),
+  do_traverse_clause_group(SmallerLnClausesGroups, Line) ++
+    BiggerOrEqualLnClausesGroups;
+traverse_clause_struct(Line, ClauseStructs) ->
+  Touched =
+    lists:any(fun(ClauseStruct) ->
+                  ClauseStruct#clause_struct.touched
+              end, ClauseStructs),
+  SmallerLnF = fun(ClauseStruct) ->
+                   ClauseStruct#clause_struct.line =< Line
+               end,
+  {SmallerLnClauses, BiggerOrEqualLnClauses} =
+    lists:splitwith(SmallerLnF, ClauseStructs),
+  do_traverse_clause_struct(SmallerLnClauses, Line, Touched) ++
+    BiggerOrEqualLnClauses.
+
+do_traverse_clause_group([], _Line) ->
+  [];
+do_traverse_clause_group(SmallerClassesGroup, Line) ->
+  Reversed = lists:reverse(SmallerClassesGroup),
+  lists:reverse([traverse_clause_struct(Line, hd(Reversed))|tl(Reversed)]).
+
+do_traverse_clause_struct([], _line, _Touched) ->
+  [];
+do_traverse_clause_struct(SmallerLnClauses, Line, Touched) ->
+  [ClauseStruct|T] = lists:reverse(SmallerLnClauses),
+  %% check if other clauses in the same group has been touched.
+  case Touched of
+    true  -> case ClauseStruct#clause_struct.touched of
+               true  -> lists:reverse([touch_clause(ClauseStruct, Line)|T]);
+               false -> SmallerLnClauses
+             end;
+    false -> lists:reverse([touch_clause(ClauseStruct, Line)|T])
+  end.
+
+touch_clause(ClauseStruct, Line) ->
+  SubClauseStruct0 = ClauseStruct#clause_struct.sub_clause,
+  SubClauseStruct  = traverse_clause_struct(Line, SubClauseStruct0),
+  ClauseStruct#clause_struct{ touched = true
+                            , sub_clause = SubClauseStruct}.
+
 
 read_and_add_records(Module, RT) ->
   read_and_add_records(Module, '_', [], [], RT).
@@ -68,14 +167,14 @@ get_mfa_from_line(M, L0) ->
         [[Line, F, A] | AllFuns] end, [], FAs),
   SortedAllFuns = lists:reverse(lists:sort(AllFuns)),
   %% [Line, F, A]
-  [L, F, A] = find_function(L0, SortedAllFuns),
+  [_L, F, A] = find_function(L0, SortedAllFuns),
   {M, F, A}.
 
 %%%_* Internal =================================================================
 
-find_function(L, [])                     ->
+find_function(_L, [])                    ->
   [];
-find_function(L, [[L0, F, A] = LFA | T]) ->
+find_function(L, [[L0, _F, _A] = LFA | T]) ->
   case L >= L0 of
     true  -> LFA;
     false -> find_function(L, T)
@@ -330,38 +429,61 @@ prep_rec([E | Es]) -> [prep_rec(E) | prep_rec(Es)];
 prep_rec(E) -> E.
 
 %% @doc replace the temporary variables with the actual value in a function
--spec var_to_val_in_fun( FunBody  :: string()
-                       , Bindings :: edts_rte_server:binding()) -> string().
-var_to_val_in_fun(FunBody, Bindings) ->
-  %% Parse function body to AbsForm
-  {ok, FunBodyToken, _} = erl_scan:string(FunBody),
-  {ok, AbsForm}         = erl_parse:parse_form(FunBodyToken),
+-spec var_to_val_in_fun( FunBody       :: string()
+                       , AllClausesLn  :: #clause_struct{}
+                       , Bindings      :: edts_rte_server:binding())
+                       -> string().
+var_to_val_in_fun(AbsForm, AllClausesLn, Bindings) ->
   %% Replace variable names with variables' value and
   %% combine the Token to function string again
-  NewFunBody            = do_var_to_val_in_fun(AbsForm, Bindings),
+  NewFunBody            = do_var_to_val_in_fun( AbsForm
+                                              , AllClausesLn
+                                              , Bindings),
   %% io:format("New Body before flatten: ~p~n", [NewFunBody]),
   NewForm               = erl_pp:form(NewFunBody),
   lists:flatten(NewForm).
 
 %% @doc replace variable names with values for a function
-do_var_to_val_in_fun({function, L, FuncName, Arity, Clauses0}, Bindings) ->
-  Clauses = replace_var_with_val_in_clauses(Clauses0, Bindings),
+do_var_to_val_in_fun( {function, L, FuncName, Arity, Clauses0}
+                    , AllClausesLn, Bindings) ->
+  Clauses = replace_var_with_val_in_clauses( Clauses0
+                                           , AllClausesLn
+                                           , Bindings),
   %% io:format("Replaced Clauses are:~p~n", [Clauses0]),
   {function, L, FuncName, Arity, Clauses}.
 
-%% @doc replace variable names with values in each of the function clauses
-replace_var_with_val_in_clauses([], _Bindings)                         ->
-  [];
-replace_var_with_val_in_clauses([ {clause,L,ArgList0,WhenList0,Lines0}|T]
-                                , Bs)                                  ->
+%% @doc replace variable names with values in each of the clauses
+replace_var_with_val_in_clauses(Clauses, AllClausesLn, Binding) ->
+  lists:map(fun({clause,L,_ArgList0,_WhenList0,_Lines0} = Clause) ->
+                case is_clause_touched(L, AllClausesLn) of
+                  true  -> do_replace_var_with_val_in_clause( Clause
+                                                            , AllClausesLn
+                                                            , Binding);
+                  false -> Clause
+                end
+            end, Clauses).
+
+is_clause_touched(_L, [])                                  ->
+  false;
+is_clause_touched(L, [H|T]) when is_list(H)                ->
+  is_clause_touched(L, H) orelse is_clause_touched(L, T);
+is_clause_touched(L, [H|_T]) when H#clause_struct.line > L ->
+  false;
+is_clause_touched(L, [H|T])                                ->
+  (H#clause_struct.line =:= L andalso H#clause_struct.touched)
+    orelse is_clause_touched(L, H#clause_struct.sub_clause)
+    orelse is_clause_touched(L, T).
+
+do_replace_var_with_val_in_clause( {clause,L,ArgList0,WhenList0,Lines0}
+                                 , AllClausesLn
+                                 , Binding)                                ->
   %% replace variables' name with values in argument list
-  ArgList  = replace_var_with_val_args(ArgList0, Bs),
+  ArgList  = replace_var_with_val_args(ArgList0, Binding),
   %% replace variables' name with values in "when" list
-  WhenList = replace_var_with_val_args(WhenList0, Bs),
+  WhenList = replace_var_with_val_args(WhenList0, Binding),
   %% replace variables' name with values for each of the expressions
-  Lines    = replace_var_with_val_in_expr(Lines0, Bs),
-  [ {clause,L,ArgList,WhenList,Lines}
-  | replace_var_with_val_in_clauses(T, Bs)].
+  Lines    = replace_var_with_val_in_expr(Lines0, AllClausesLn, Binding),
+  {clause,L,ArgList,WhenList,Lines}.
 
 replace_var_with_val_args([], _Bindings)->[];
 replace_var_with_val_args([VarExpr0|T], Bindings) ->
@@ -369,102 +491,105 @@ replace_var_with_val_args([VarExpr0|T], Bindings) ->
   [VarExpr | replace_var_with_val_args(T, Bindings)].
 
 %% @doc replace the variable in a list of expressions with its actual valuex
-replace_var_with_val_in_exprs(Exprs, Bindings) ->
+replace_var_with_val_in_exprs(Exprs, ExecClausesLn, Bindings) ->
   lists:map(fun(Expr) ->
-                replace_var_with_val_in_expr(Expr, Bindings)
+                replace_var_with_val_in_expr(Expr, ExecClausesLn, Bindings)
             end, Exprs).
 
 %% @doc replace the variable in the expression with its actual valuex
-replace_var_with_val_in_expr([], _Bindings)                               ->
+replace_var_with_val_in_expr([], _ECLn, _Bs)                              ->
   [];
-replace_var_with_val_in_expr(Atom, _Bindings) when is_atom(Atom)          ->
+replace_var_with_val_in_expr(Atom, _ECLn, _Bs) when is_atom(Atom)         ->
   Atom;
-replace_var_with_val_in_expr({nil, L}, _Bindings)                         ->
+replace_var_with_val_in_expr({nil, L}, _ECLn, _Bs)                        ->
   {nil, L};
-replace_var_with_val_in_expr({atom, _L, _A} = VarExpr, _Bindings)         ->
+replace_var_with_val_in_expr({atom, _L, _A} = VarExpr, _ECLn, _Bs)        ->
   VarExpr;
-replace_var_with_val_in_expr({cons, L, Expr0, Rest0}, Bindings)           ->
-  Expr = replace_var_with_val_in_expr(Expr0, Bindings),
-  Rest = replace_var_with_val_in_expr(Rest0, Bindings),
+replace_var_with_val_in_expr({cons, L, Expr0, Rest0}, ECLn, Bs)           ->
+  Expr = replace_var_with_val_in_expr(Expr0, ECLn, Bs),
+  Rest = replace_var_with_val_in_expr(Rest0, ECLn, Bs),
   {cons, L, Expr, Rest};
-replace_var_with_val_in_expr({tuple, L, Exprs0}, Bindings)                ->
-  Exprs = replace_var_with_val_in_exprs(Exprs0, Bindings),
+replace_var_with_val_in_expr({tuple, L, Exprs0}, ECLn, Bs)                ->
+  Exprs = replace_var_with_val_in_exprs(Exprs0, ECLn, Bs),
   {tuple, L, Exprs};
-replace_var_with_val_in_expr({float, _, _} = VarExpr, _Bindings)          ->
+replace_var_with_val_in_expr({float, _, _} = VarExpr, _ECLn, _Bs)         ->
   VarExpr;
-replace_var_with_val_in_expr({integer, _, _} = VarExpr, _Bindings)        ->
+replace_var_with_val_in_expr({integer, _, _} = VarExpr, _ECLn, _Bs)       ->
   VarExpr;
-replace_var_with_val_in_expr({match,L,LExpr0,RExpr0}, Bindings)           ->
-  LExpr = replace_var_with_val_in_expr(LExpr0, Bindings),
-  RExpr = replace_var_with_val_in_expr(RExpr0, Bindings),
+replace_var_with_val_in_expr({match,L,LExpr0,RExpr0}, ECLn, Bs)           ->
+  LExpr = replace_var_with_val_in_expr(LExpr0, ECLn, Bs),
+  RExpr = replace_var_with_val_in_expr(RExpr0, ECLn, Bs),
   {match,L,LExpr,RExpr};
-replace_var_with_val_in_expr({var, _, _} = VarExpr, Bindings)             ->
-  replace_var_with_val(VarExpr, Bindings);
-replace_var_with_val_in_expr({op, L, Ops, LExpr0, RExpr0}, Bindings)      ->
-  LExpr = replace_var_with_val_in_expr(LExpr0, Bindings),
-  RExpr = replace_var_with_val_in_expr(RExpr0, Bindings),
+replace_var_with_val_in_expr({var, _, _} = VarExpr, _ECLn, Bs)            ->
+  replace_var_with_val(VarExpr, Bs);
+replace_var_with_val_in_expr({op, L, Ops, Expr0}, ECLn, Bs)               ->
+  Expr = replace_var_with_val_in_expr(Expr0, ECLn, Bs),
+  {op, L, Ops, Expr};
+replace_var_with_val_in_expr({op, L, Ops, LExpr0, RExpr0}, ECLn, Bs)      ->
+  LExpr = replace_var_with_val_in_expr(LExpr0, ECLn, Bs),
+  RExpr = replace_var_with_val_in_expr(RExpr0, ECLn, Bs),
   {op, L, Ops, LExpr, RExpr};
 replace_var_with_val_in_expr( {call, L, {atom, L, F0}, ArgList0}
-                            , Bindings)                                   ->
-  F = replace_var_with_val_in_expr(F0, Bindings),
-  {call, L, {atom, L, F}, replace_var_with_val_args(ArgList0, Bindings)};
+                            , ECLn, Bs)                                   ->
+  F = replace_var_with_val_in_expr(F0, ECLn, Bs),
+  {call, L, {atom, L, F}, replace_var_with_val_args(ArgList0, Bs)};
 replace_var_with_val_in_expr( {call, L, {remote, L, M0, F0}, Args0}
-                            , Bindings)                                   ->
-  M = replace_var_with_val_in_expr(M0, Bindings),
-  F = replace_var_with_val_in_expr(F0, Bindings),
-  {call, L, {remote, L, M, F}, replace_var_with_val_args(Args0, Bindings)};
+                            , ECLn, Bs)                                   ->
+  M = replace_var_with_val_in_expr(M0, ECLn, Bs),
+  F = replace_var_with_val_in_expr(F0, ECLn, Bs),
+  {call, L, {remote, L, M, F}, replace_var_with_val_args(Args0, Bs)};
 replace_var_with_val_in_expr( {'case', L, CaseExpr0, Clauses0}
-                            , Bindings)                                   ->
-  CaseExpr = replace_var_with_val_in_expr(CaseExpr0, Bindings),
-  Clauses  = replace_var_with_val_in_clauses(Clauses0, Bindings),
+                            , ECLn, Bs)                                   ->
+  CaseExpr = replace_var_with_val_in_expr(CaseExpr0, ECLn, Bs),
+  Clauses  = replace_var_with_val_in_clauses(Clauses0, ECLn, Bs),
   {'case', L, CaseExpr, Clauses};
 replace_var_with_val_in_expr( {string, _L, _Str} = String
-                            , _Bindings)                                  ->
+                            , _ECLn, _Bs)                                 ->
   String;
 replace_var_with_val_in_expr( { 'try', L, Exprs0, PatternClauses0
                               , ExceptionClauses0, FinalExprs0}
-                            , Bindings)                                   ->
-  Exprs            = replace_var_with_val_in_exprs(Exprs0, Bindings),
+                            , ECLn, Bs)                                   ->
+  Exprs            = replace_var_with_val_in_exprs(Exprs0, ECLn, Bs),
   PatternClauses   = replace_var_with_val_in_clauses( PatternClauses0
-                                                    , Bindings),
+                                                    , ECLn, Bs),
   ExceptionClauses = replace_var_with_val_in_clauses( ExceptionClauses0
-                                                    , Bindings),
+                                                    , ECLn, Bs),
   FinalExprs       = replace_var_with_val_in_exprs( FinalExprs0
-                                                  , Bindings),
+                                                  , ECLn, Bs),
   {'try', L, Exprs, PatternClauses, ExceptionClauses, FinalExprs};
-replace_var_with_val_in_expr({lc, L, Expr0, GenExprs0}, Bindings)         ->
-  Expr     = replace_var_with_val_in_expr(Expr0, Bindings),
-  GenExprs = replace_var_with_val_in_exprs(GenExprs0, Bindings),
+replace_var_with_val_in_expr({lc, L, Expr0, GenExprs0}, ECLn, Bs)         ->
+  Expr     = replace_var_with_val_in_expr(Expr0, ECLn, Bs),
+  GenExprs = replace_var_with_val_in_exprs(GenExprs0, ECLn, Bs),
   {lc, L, Expr, GenExprs};
-replace_var_with_val_in_expr({generate, L, ResExp, GenExp}, Bindings)     ->
-  { generate, L, replace_var_with_val_in_expr(ResExp, Bindings)
-  , replace_var_with_val_in_expr(GenExp, Bindings)};
-replace_var_with_val_in_expr({'receive', L, Clauses0}, Bindings)          ->
-  Clauses  = replace_var_with_val_in_clauses(Clauses0, Bindings),
+replace_var_with_val_in_expr({generate, L, ResExp, GenExp}, ECLn, Bs)     ->
+  { generate, L, replace_var_with_val_in_expr(ResExp, ECLn, Bs)
+  , replace_var_with_val_in_expr(GenExp, ECLn, Bs)};
+replace_var_with_val_in_expr({'receive', L, Clauses0}, ECLn, Bs)          ->
+  Clauses  = replace_var_with_val_in_clauses(Clauses0, ECLn, Bs),
   {'receive', L, Clauses};
 replace_var_with_val_in_expr( {'receive', L, Clauses0, Int, Exprs0}
-                            , Bindings)                                   ->
-  Clauses  = replace_var_with_val_in_clauses(Clauses0, Bindings),
-  Expr     = replace_var_with_val_in_exprs(Exprs0, Bindings),
+                            , ECLn, Bs)                                   ->
+  Clauses  = replace_var_with_val_in_clauses(Clauses0, ECLn, Bs),
+  Expr     = replace_var_with_val_in_exprs(Exprs0, ECLn, Bs),
   {'receive', L, Clauses, Int, Expr};
 replace_var_with_val_in_expr( {record, _, _Name, _Fields} = Record
-                            , _Bindings)                                  ->
+                            , _ECLn, _Bs)                                 ->
   edts_rte_erlang:expand_records( edts_rte_server:record_table_name()
                                 , Record);
-replace_var_with_val_in_expr([Statement0|T], Bindings)                    ->
-  Statement = replace_var_with_val_in_expr(Statement0, Bindings),
-  [Statement | replace_var_with_val_in_expr(T, Bindings)];
-replace_var_with_val_in_expr(Var, _Bindings)                              ->
+replace_var_with_val_in_expr([Statement0|T], ECLn, Bs)                    ->
+  Statement = replace_var_with_val_in_expr(Statement0, ECLn, Bs),
+  [Statement | replace_var_with_val_in_expr(T, ECLn, Bs)];
+replace_var_with_val_in_expr(Var, _ECLn, _Bs)                             ->
   io:format("Var:~p~n", [Var]),
   error(crap).
 
-replace_var_with_val({var, L, VariableName}, Bindings) ->
-  Value = proplists:get_value(VariableName, Bindings),
+replace_var_with_val({var, L, VariableName}, Bs) ->
+  Value = proplists:get_value(VariableName, Bs),
   io:format("VarName:~p   L:~p    Val:~p~n", [VariableName, L, Value]),
   Val = do_replace(Value, L),
   io:format("replaced Var:~p~n", [Val]),
   Val;
-replace_var_with_val(Other, _Bindings)                 ->
+replace_var_with_val(Other, _Bs)                 ->
   Other.
 
 do_replace(Value, L) ->
