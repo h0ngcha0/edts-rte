@@ -79,22 +79,33 @@ extract_exprs_line_num(Exprs) ->
                 extract_expr_line_num(Expr) ++ LineNums
               end, [], Exprs).
 
-extract_expr_line_num({'case', _L, _CaseExpr, Clauses})  ->
-  [extract_clauses_line_num(Clauses)];
-extract_expr_line_num({ 'try', _L, _Exprs, PatternClauses
-                        , ExceptionClauses, _FinalExprs}) ->
-  [extract_clauses_line_num(PatternClauses)] ++
-    [extract_clauses_line_num(ExceptionClauses)];
+extract_expr_line_num({'case', _L, CaseExpr, Clauses})  ->
+  plc(Clauses) ++ ple(CaseExpr);
+extract_expr_line_num({ 'try', _L, Exprs, PatternClauses
+                      , ExceptionClauses, FinalExprs}) ->
+  ple(FinalExprs) ++ plc(ExceptionClauses) ++
+    plc(PatternClauses) ++ ple(Exprs);
 extract_expr_line_num({'receive', _L, Clauses})          ->
-  [extract_clauses_line_num(Clauses)];
+  plc(Clauses);
 extract_expr_line_num(_)                                 ->
   [].
+
+ple(Expr) ->
+  pl(Expr, fun extract_expr_line_num/1).
+
+plc(Clauses) ->
+  pl(Clauses, fun extract_clauses_line_num/1).
+
+pl(Expr, F) ->
+  case F(Expr) of
+    [] -> [];
+    E  -> [E]
+  end.
 
 %% @doc traverse all the clauses and mark all the touched node
 %%      if one of the clause in a group of clauses are touched,
 %%      do not touch the rest of the clause.
 traverse_clause_struct(_Line, []) ->
-  io:format("tcs, Line 1:~p~n", [_Line]),
   [];
 traverse_clause_struct(Line, [H|_T] = ClausesGroups) when is_list(H) ->
   SmallerLnF = fun(ClauseStructs) ->
@@ -103,8 +114,6 @@ traverse_clause_struct(Line, [H|_T] = ClausesGroups) when is_list(H) ->
                end,
   {SmallerLnClausesGroups, BiggerOrEqualLnClausesGroups} =
     lists:splitwith(SmallerLnF, ClausesGroups),
-  io:format("tcs, sg:~p~n", [SmallerLnClausesGroups]),
-  io:format("tcs, bg:~p~n", [BiggerOrEqualLnClausesGroups]),
   do_traverse_clause_group(SmallerLnClausesGroups, Line) ++
     BiggerOrEqualLnClausesGroups;
 traverse_clause_struct(Line, ClauseStructs) ->
@@ -117,8 +126,6 @@ traverse_clause_struct(Line, ClauseStructs) ->
                end,
   {SmallerLnClauses, BiggerOrEqualLnClauses} =
     lists:splitwith(SmallerLnF, ClauseStructs),
-  io:format("tcs, sc:~p~n", [SmallerLnClauses]),
-  io:format("tcs, bc:~p~n", [BiggerOrEqualLnClauses]),
   do_traverse_clause_struct(SmallerLnClauses, Line, Touched) ++
     BiggerOrEqualLnClauses.
 
@@ -448,9 +455,6 @@ do_var_to_val_in_fun( {function, L, FuncName, Arity, Clauses0}
 %% @doc replace variable names with values in each of the clauses
 replace_var_with_val_in_clauses(Clauses, AllClausesLn, Binding) ->
   lists:map(fun({clause,L,_ArgList0,_WhenList0,_Lines0} = Clause) ->
-                Touched = is_clause_touched(L, AllClausesLn),
-                io:format( "L:~p~nAc:~p~ntouched:~p~n"
-                         , [L, AllClausesLn, Touched]),
                 case is_clause_touched(L, AllClausesLn) of
                   true  -> do_replace_var_with_val_in_clause( Clause
                                                             , AllClausesLn
@@ -459,13 +463,13 @@ replace_var_with_val_in_clauses(Clauses, AllClausesLn, Binding) ->
                 end
             end, Clauses).
 
-is_clause_touched(L, [])                                  ->
+is_clause_touched(_L, [])                                  ->
   false;
-is_clause_touched(L, [H|T]) when is_list(H)               ->
+is_clause_touched(L, [H|T]) when is_list(H)                ->
   is_clause_touched(L, H) orelse is_clause_touched(L, T);
-is_clause_touched(L, [H|T]) when H#clause_struct.line > L ->
+is_clause_touched(L, [H|_T]) when H#clause_struct.line > L ->
   false;
-is_clause_touched(L, [H|T])                               ->
+is_clause_touched(L, [H|T])                                ->
   (H#clause_struct.line =:= L andalso H#clause_struct.touched)
     orelse is_clause_touched(L, H#clause_struct.sub_clause)
     orelse is_clause_touched(L, T).
