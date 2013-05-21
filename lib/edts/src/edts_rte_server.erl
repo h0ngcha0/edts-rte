@@ -62,6 +62,7 @@
                    , depth        = 0          :: non_neg_integer()
                    , line         = undefined  :: non_neg_integer() | undefined
                    , mfa_form_map = undefined  :: dict()
+                   , subfuns      = []         :: list()
                    }).
 
 %%%_* Types ====================================================================
@@ -158,6 +159,7 @@ handle_call({rte_run, Module, Fun, Args0}, _From, State) ->
                                          , line         = undefined
                                          , depth        = 0
                                          , mfa_form_map = dict:new()
+                                         , subfuns      = []
                                          }}.
 
 %%------------------------------------------------------------------------------
@@ -200,7 +202,7 @@ handle_cast({send_binding, {break_at, Bindings, Module, Line, Depth}}, State) ->
   %% get mfa and add one level if it is not main function
   %% output sub function body when the process leaves it.
   %% Only step into one more depth right now.
-  MFAFormMap =
+  {Result, MFAFormMap} =
     case State#dbg_state.depth > Depth of
       true  ->
         io:format( "in send_binding...:~n mfa:~p~nbinding:~p~nDepth:~p~n"
@@ -210,30 +212,51 @@ handle_cast({send_binding, {break_at, Bindings, Module, Line, Depth}}, State) ->
         ReplacedFun = replace_fun_body( State#dbg_state.bindings
                                       , State#dbg_state.mfa
                                       , MFAFormMap0),
-        send_fun(M, F, A, ReplacedFun),
+        %%send_fun(M, F, A, ReplacedFun),
         cleanup_exec_clauses_linum( State#dbg_state.mfa
-                                  , MFAFormMap0);
+                                  , MFAFormMap0),
+        {ok, ReplacedFun};
       false ->
-        MFAFormMap0
+        {false, MFAFormMap0}
     end,
 
   io:format("old mfa:~p~n", [State#dbg_state.mfa]),
   io:format("new mfa:~p~n", [MFA]),
   edts_rte_int_listener:step(),
 
+  io:format("result is:~p, mfaformmap is:~p~n", [Result, MFAFormMap]),
+  SubFuns = 
+    case Result of
+      ok ->
+        [concat_subfun(State#dbg_state.mfa, MFAFormMap)]
+          ++ State#dbg_state.subfuns;
+      false ->
+        State#dbg_state.subfuns
+    end,
+  io:format("subfuns is:~p~n", [SubFuns]),
   %% save current bindings for further use
-  {noreply, State#dbg_state{ bindings = Bindings, mfa = MFA
+  Return = {noreply, State#dbg_state{ bindings = Bindings, mfa = MFA
                            , depth = Depth, line = Line
-                           , mfa_form_map = MFAFormMap }};
-
+                           , mfa_form_map = MFAFormMap
+                           , subfuns = SubFuns}},
+  io:format("State.subfuns is:~p~n", [State#dbg_state.subfuns]),
+  Return;
 handle_cast(exit, #dbg_state{bindings = Bindings, line = Line} = State) ->
   io:format( "in exit...:~n mfa:~p~nbinding:~p~n"
            , [State#dbg_state.mfa, Bindings]),
   {M, F, Arity} = MFA = State#dbg_state.mfa,
   MFAFormMap = update_mfa_form_map( State#dbg_state.mfa_form_map
                                   , MFA, Line),
+
+  SubFuns = concat_sub_funs(State#dbg_state.subfuns),
   ReplacedFun = replace_fun_body(Bindings, MFA, MFAFormMap),
-  send_fun(M, F, Arity, ReplacedFun),
+  Fs = atom_to_list(M) ++ "-"  ++ 
+    atom_to_list(F)    ++ "-"  ++ 
+    integer_to_list(Arity) ++ "-"  ++
+    ReplacedFun        ++ "\n" ++
+    SubFuns,
+  %%send_fun(M, F, Arity, ReplacedFun),
+  send_fun(M, F, Arity, Fs),
   {noreply, State};
 handle_cast(_Msg, State) ->
   {noreply, State}.
@@ -245,6 +268,19 @@ replace_fun_body(Bindings, MFA, MFAFormMap) ->
 cleanup_exec_clauses_linum(MFA, MFAFormMap) ->
   {FunAbsForm, _AllClausesLn} = dict:fetch(MFA, MFAFormMap),
   dict:store(MFA, {FunAbsForm, undefined}, MFAFormMap).
+
+concat_subfun(MFA, Fun) ->
+  {M, F, A} = MFA,
+  [M, F, A, Fun].
+
+concat_sub_funs(SubFuns) ->
+  lists:foldl(
+    fun([M, F, A, Fun], FunsBody) ->
+        atom_to_list(M)    ++ "-" ++ 
+        atom_to_list(F)    ++ "-" ++ 
+        integer_to_list(A) ++ "-" ++
+        "\n" ++ Fun
+    end, [], SubFuns).
 
 %%------------------------------------------------------------------------------
 %% @private
