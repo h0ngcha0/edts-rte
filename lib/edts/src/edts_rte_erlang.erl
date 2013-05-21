@@ -79,16 +79,36 @@ extract_exprs_line_num(Exprs) ->
                 extract_expr_line_num(Expr) ++ LineNums
               end, [], Exprs).
 
-extract_expr_line_num({'case', _L, CaseExpr, Clauses})  ->
+extract_expr_line_num(Exprs) when is_list(Exprs)         ->
+  ples(Exprs);
+extract_expr_line_num({cons, _L, Expr, Rest})            ->
+  ples(Rest) ++ ple(Expr);
+extract_expr_line_num({tuple, _L, Exprs})                ->
+  ples(Exprs);
+extract_expr_line_num({match,_L,LExpr,RExpr})            ->
+  ple(RExpr) ++ ple(LExpr);
+extract_expr_line_num({op, _L, _Ops, Expr})              ->
+  ple(Expr);
+extract_expr_line_num({op, _L, _Ops, LExpr, RExpr})      ->
+  ple(RExpr) ++ ple(LExpr);
+extract_expr_line_num({lc, _L, Expr, GenExprs})          ->
+  ples(GenExprs) ++ ple(Expr);
+extract_expr_line_num({generate, _L, ResExp, GenExp})    ->
+  ple(GenExp) ++ ple(ResExp);
+extract_expr_line_num({'case', _L, CaseExpr, Clauses})   ->
   plc(Clauses) ++ ple(CaseExpr);
 extract_expr_line_num({ 'try', _L, Exprs, PatternClauses
-                      , ExceptionClauses, FinalExprs}) ->
+                      , ExceptionClauses, FinalExprs})   ->
   ple(FinalExprs) ++ plc(ExceptionClauses) ++
     plc(PatternClauses) ++ ple(Exprs);
 extract_expr_line_num({'receive', _L, Clauses})          ->
   plc(Clauses);
 extract_expr_line_num(_)                                 ->
   [].
+
+%% Result is in the reserse order of Exprs
+ples(Exprs) ->
+  lists:foldl(fun(Expr, NewExprs) -> ple(Expr) ++ NewExprs end, Exprs).
 
 ple(Expr) ->
   pl(Expr, fun extract_expr_line_num/1).
@@ -98,8 +118,8 @@ plc(Clauses) ->
 
 pl(Expr, F) ->
   case F(Expr) of
-    [] -> [];
-    E  -> [E]
+    L when is_list(L) -> L;
+    E                 -> [E]
   end.
 
 %% @doc traverse all the clauses and mark all the touched node
@@ -496,7 +516,9 @@ replace_var_with_val_in_exprs(Exprs, ExecClausesLn, Bindings) ->
                 replace_var_with_val_in_expr(Expr, ExecClausesLn, Bindings)
             end, Exprs).
 
-%% @doc replace the variable in the expression with its actual valuex
+%% @doc replace the variable in the expression with its actual value
+%%      it takes two extra parameters. the line number of all the clauses
+%%      that were executed and the binding information.
 replace_var_with_val_in_expr([], _ECLn, _Bs)                              ->
   [];
 replace_var_with_val_in_expr(Atom, _ECLn, _Bs) when is_atom(Atom)         ->
@@ -579,9 +601,8 @@ replace_var_with_val_in_expr( {record, _, _Name, _Fields} = Record
 replace_var_with_val_in_expr([Statement0|T], ECLn, Bs)                    ->
   Statement = replace_var_with_val_in_expr(Statement0, ECLn, Bs),
   [Statement | replace_var_with_val_in_expr(T, ECLn, Bs)];
-replace_var_with_val_in_expr(Var, _ECLn, _Bs)                             ->
-  io:format("Var:~p~n", [Var]),
-  error(crap).
+replace_var_with_val_in_expr(Expr, _ECLn, _Bs)                            ->
+  error({unexpected_expression, Expr}).
 
 replace_var_with_val({var, L, VariableName}, Bs) ->
   Value = proplists:get_value(VariableName, Bs),
