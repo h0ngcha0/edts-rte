@@ -198,12 +198,11 @@ handle_cast({send_binding, {break_at, Bindings, Module, Line, Depth}}, State) ->
 
   MFAFormMap0 = update_mfa_form_map( State#dbg_state.mfa_form_map
                                    , MFA, Line),
-  io:format("after update_mfa, MFAFormMap0 is~p~n", [MFAFormMap0]),
 
   %% get mfa and add one level if it is not main function
   %% output sub function body when the process leaves it.
   %% Only step into one more depth right now.
-  {Result, MFAFormMap} =
+  {Result, MFAFormMap, FunBody} =
     case State#dbg_state.depth > Depth of
       true  ->
         io:format( "in send_binding...:~n mfa:~p~nbinding:~p~nDepth:~p~n"
@@ -213,13 +212,12 @@ handle_cast({send_binding, {break_at, Bindings, Module, Line, Depth}}, State) ->
         ReplacedFun = replace_fun_body( State#dbg_state.bindings
                                       , State#dbg_state.mfa
                                       , MFAFormMap0),
-        %%send_fun(M, F, A, ReplacedFun),
+        io:format("replaced fun is:~p~n", [ReplacedFun]),
         Rs = cleanup_exec_clauses_linum( State#dbg_state.mfa
                                   , MFAFormMap0),
-        io:format("Rs is:~p~n", [Rs]),
-        {ok, Rs};
+        {ok, Rs, ReplacedFun};
       false ->
-        {false, MFAFormMap0}
+        {false, MFAFormMap0, undefined}
     end,
 
   io:format("old mfa:~p~n", [State#dbg_state.mfa]),
@@ -229,14 +227,14 @@ handle_cast({send_binding, {break_at, Bindings, Module, Line, Depth}}, State) ->
   SubFuns = 
     case Result of
       ok ->
-        [concat_subfun(State#dbg_state.mfa, MFAFormMap)]
-          ++ State#dbg_state.subfuns;
+        {M0, F0, A0} = State#dbg_state.mfa,
+        Sf = [M0, F0, A0, FunBody],
+        Funs = [Sf] ++ State#dbg_state.subfuns,
+        Funs;
       false ->
         State#dbg_state.subfuns
     end,
 
-  io:format("after SubFuns~p~n", [SubFuns]),
- 
   %% save current bindings for further use
   {noreply, State#dbg_state{ bindings = Bindings, mfa = MFA
                              , depth = Depth, line = Line
@@ -251,13 +249,13 @@ handle_cast(exit, #dbg_state{bindings = Bindings, line = Line} = State) ->
 
   SubFuns = concat_sub_funs(State#dbg_state.subfuns),
   ReplacedFun = replace_fun_body(Bindings, MFA, MFAFormMap),
-  Fs = atom_to_list(M) ++ "-"  ++ 
-    atom_to_list(F)    ++ "-"  ++ 
-    integer_to_list(Arity) ++ "-"  ++
-    ReplacedFun        ++ "\n" ++
+  Fs = atom_to_list(M)     ++ "-"  ++ 
+    atom_to_list(F)        ++ "-"  ++ 
+    integer_to_list(Arity) ++ "\n" ++
+    ReplacedFun            ++ "\n" ++
     SubFuns,
-  %%send_fun(M, F, Arity, ReplacedFun),
   send_fun(M, F, Arity, Fs),
+
   {noreply, State};
 handle_cast(_Msg, State) ->
   {noreply, State}.
@@ -268,19 +266,16 @@ replace_fun_body(Bindings, MFA, MFAFormMap) ->
 
 cleanup_exec_clauses_linum(MFA, MFAFormMap) ->
   {FunAbsForm, _AllClausesLn} = dict:fetch(MFA, MFAFormMap),
-  dict:store(MFA, {FunAbsForm, undefined}, MFAFormMap).
-
-concat_subfun(MFA, Fun) ->
-  {M, F, A} = MFA,
-  [M, F, A, Fun].
+  dict:store(MFA, {FunAbsForm, []}, MFAFormMap).
 
 concat_sub_funs(SubFuns) ->
   lists:foldl(
     fun([M, F, A, Fun], FunsBody) ->
-        atom_to_list(M)    ++ "-" ++ 
-        atom_to_list(F)    ++ "-" ++ 
-        integer_to_list(A) ++ "-" ++
-        "\n" ++ Fun
+        atom_to_list(M)    ++ "-"  ++ 
+        atom_to_list(F)    ++ "-"  ++ 
+        integer_to_list(A) ++ "\n" ++ 
+        Fun                ++ "\n" ++
+        FunsBody           ++ "\n"
     end, [], SubFuns).
 
 %%------------------------------------------------------------------------------
@@ -316,6 +311,7 @@ new_mfa(State, Module, Line, Depth) ->
   end.
 
 send_fun(M, F, Arity, FunBody) ->
+  io:format("final function body is:~p~n", [FunBody]),
   lists:foreach(fun(Fun) ->
                     Fun(M, F, Arity, FunBody)
                 end, [ fun send_fun_to_edts_web/4
@@ -354,22 +350,18 @@ mk_editor(Id, FunBody) ->
 %% then rte shall feel confused and refuse to display any value of
 %% the variables.
 update_mfa_form_map(MFAFormMap, {M, F, A}, Line) ->
-  io:format("MFAFormMap in update_mfa is:~p~n", [MFAFormMap]),
   case dict:is_key({M, F, A}, MFAFormMap) of
     true  ->
       {FunAbsForm, AllClausesLn} =
         dict:fetch({M, F, A}, MFAFormMap),
-      io:format("in true before store~n"),
       %% try to touch the clause structs
       S = dict:store( {M, F, A}
                 , { FunAbsForm
                   , edts_rte_erlang:traverse_clause_struct(Line, AllClausesLn)
                   }
                 , MFAFormMap),
-      io:format("in true after store~n"),
       S;
     false ->
-      io:format("in true~n"),
       {ok, FunAbsForm} = edts_code:get_function_body(M, F, A),
       AllClausesLn     = edts_rte_erlang:extract_fun_clauses_line_num(
                            FunAbsForm),
