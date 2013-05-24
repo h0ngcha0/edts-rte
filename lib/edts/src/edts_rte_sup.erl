@@ -41,8 +41,7 @@
 %% API functions
 %% ===================================================================
 start() ->
-  ?MODULE:start_link(),
-  {node(), ok}.
+  ?MODULE:start_link().
 
 start_link() ->
   supervisor:start_link({local, ?MODULE}, ?MODULE, []).
