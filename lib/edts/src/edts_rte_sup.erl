@@ -53,9 +53,8 @@ started_p() ->
 %% Supervisor callbacks
 %% ===================================================================
 init([]) ->
-  RteServer      = ?CHILD(edts_rte_server, worker),
-  RteIntListener = ?CHILD(edts_rte_int_listener, worker),
-  {ok, { {one_for_one, 5, 10}, [RteServer, RteIntListener]}}.
+  RteServer = ?CHILD(edts_rte_server, worker),
+  {ok, { {one_for_one, 5, 10}, [RteServer]}}.
 
 %%%_* Emacs ============================================================
 %%% Local Variables:

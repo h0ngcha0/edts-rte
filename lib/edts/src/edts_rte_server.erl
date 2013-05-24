@@ -129,9 +129,10 @@ record_table_name() ->
                       {stop, atom()}.
 %%------------------------------------------------------------------------------
 init([]) ->
+  %% start the int listener
+  edts_rte_int_listener:start(),
   %% set the table to public to make debugging easier
   RcdTbl = ets:new(?RCDTBL, [public, named_table]),
-  io:format("RcdTbl:~p~n", [RcdTbl]),
   {ok, #dbg_state{record_table = RcdTbl}}.
 
 handle_call({rte_run, Module, Fun, Args0}, _From, State) ->
