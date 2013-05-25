@@ -197,7 +197,7 @@ handle_cast({send_binding, {break_at, Bindings, Module, Line, Depth}}, State) ->
   MFA = new_mfa(State, Module, Line, Depth),
 
   MFAFormMap0 = update_mfa_form_map( State#dbg_state.mfa_form_map
-                                   , MFA, Line),
+                                   , MFA, Depth, Line),
 
   %% get mfa and add one level if it is not main function
   %% output sub function body when the process leaves it.
@@ -212,7 +212,6 @@ handle_cast({send_binding, {break_at, Bindings, Module, Line, Depth}}, State) ->
         ReplacedFun = replace_fun_body( State#dbg_state.bindings
                                       , State#dbg_state.mfa
                                       , MFAFormMap0),
-        io:format("replaced fun is:~p~n", [ReplacedFun]),
         Rs = cleanup_exec_clauses_linum( State#dbg_state.mfa
                                   , MFAFormMap0),
         {ok, Rs, ReplacedFun};
@@ -245,7 +244,7 @@ handle_cast(exit, #dbg_state{bindings = Bindings, line = Line} = State) ->
            , [State#dbg_state.mfa, Bindings]),
   {M, F, Arity} = MFA = State#dbg_state.mfa,
   MFAFormMap = update_mfa_form_map( State#dbg_state.mfa_form_map
-                                  , MFA, Line),
+                                  , MFA, 2, Line),
 
   SubFuns = concat_sub_funs(State#dbg_state.subfuns),
   ReplacedFun = replace_fun_body(Bindings, MFA, MFAFormMap),
@@ -254,6 +253,7 @@ handle_cast(exit, #dbg_state{bindings = Bindings, line = Line} = State) ->
     integer_to_list(Arity) ++ "\n" ++
     ReplacedFun            ++ "\n" ++
     SubFuns,
+  io:format("all functions:~p~n", [Fs]),
   send_fun(M, F, Arity, Fs),
 
   {noreply, State};
@@ -303,10 +303,13 @@ code_change(_OldVsn, State, _Extra) ->
 
 %%%_* Internal =================================================================
 new_mfa(State, Module, Line, Depth) ->
+  io:format("start in new_mfa~n"),
   case State#dbg_state.depth =/= Depth of
     true  ->
+      io:format("in new_mfa true~n"),
       edts_rte_erlang:get_mfa_from_line(Module, Line);
     false ->
+      io:format("in new_mfa false~n"),
       State#dbg_state.mfa
   end.
 
@@ -349,13 +352,13 @@ mk_editor(Id, FunBody) ->
 %% if the clauses are unfortunately programmed in the same line
 %% then rte shall feel confused and refuse to display any value of
 %% the variables.
-update_mfa_form_map(MFAFormMap, {M, F, A}, Line) ->
-  case dict:is_key({M, F, A}, MFAFormMap) of
+update_mfa_form_map(MFAFormMap, {M, F, A}, D, Line) ->
+  case dict:is_key({M, F, A, D}, MFAFormMap) of
     true  ->
       {FunAbsForm, AllClausesLn} =
-        dict:fetch({M, F, A}, MFAFormMap),
+        dict:fetch({M, F, A, D}, MFAFormMap),
       %% try to touch the clause structs
-      S = dict:store( {M, F, A}
+      S = dict:store( {M, F, A, D}
                 , { FunAbsForm
                   , edts_rte_erlang:traverse_clause_struct(Line, AllClausesLn)
                   }
@@ -365,7 +368,7 @@ update_mfa_form_map(MFAFormMap, {M, F, A}, Line) ->
       {ok, FunAbsForm} = edts_code:get_function_body(M, F, A),
       AllClausesLn     = edts_rte_erlang:extract_fun_clauses_line_num(
                            FunAbsForm),
-      dict:store({M, F, A}, {FunAbsForm, AllClausesLn}, MFAFormMap)
+      dict:store({M, F, A, D}, {FunAbsForm, AllClausesLn}, MFAFormMap)
   end.
 
 %%%_* Unit tests ===============================================================
