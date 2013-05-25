@@ -283,9 +283,11 @@ do_init_node(Node, ProjectRoot, LibDirs) ->
     ok = edts_dist:remote_load_modules(Node, [edts_code,
                                               edts_dialyzer,
                                               edts_eunit,
+                                              edts_rte,
+                                              edts_rte_erlang,
                                               edts_rte_int_listener,
                                               edts_rte_server,
-                                              edts_rte_erlang,
+                                              edts_rte_sup,
                                               edts_eunit_listener,
                                               edts_xref,
                                               edts_util]),
@@ -295,8 +297,8 @@ do_init_node(Node, ProjectRoot, LibDirs) ->
       application:get_env(edts, project_dir),
     ok = edts_dist:set_app_env(Node, edts, project_dir, ProjectDir),
     {ok, edts_dist:ensure_services_started(Node, [ edts_code
-                                                 , edts_rte_int_listener
-                                                 , edts_rte_server ])}
+                                                 , edts_rte
+                                                 ])}
   catch
     C:E ->
       edts_log:error("~p initialization crashed with ~p:~p~nStacktrace:~n~p",
