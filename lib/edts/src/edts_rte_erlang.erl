@@ -554,12 +554,12 @@ replace_var_with_val_in_expr({op, L, Ops, LExpr0, RExpr0}, ECLn, Bs)      ->
 replace_var_with_val_in_expr( {call, L, {atom, L, F0}, ArgList0}
                             , ECLn, Bs)                                   ->
   F = replace_var_with_val_in_expr(F0, ECLn, Bs),
-  {call, L, {atom, L, F}, replace_var_with_val_args(ArgList0, Bs)};
+  {call, L, {atom, L, F}, replace_var_with_val_in_exprs(ArgList0, ECLn, Bs)};
 replace_var_with_val_in_expr( {call, L, {remote, L, M0, F0}, Args0}
                             , ECLn, Bs)                                   ->
   M = replace_var_with_val_in_expr(M0, ECLn, Bs),
   F = replace_var_with_val_in_expr(F0, ECLn, Bs),
-  {call, L, {remote, L, M, F}, replace_var_with_val_args(Args0, Bs)};
+  {call, L, {remote, L, M, F}, replace_var_with_val_in_exprs(Args0, ECLn, Bs)};
 replace_var_with_val_in_expr( {'case', L, CaseExpr0, Clauses0}
                             , ECLn, Bs)                                   ->
   CaseExpr = replace_var_with_val_in_expr(CaseExpr0, ECLn, Bs),
