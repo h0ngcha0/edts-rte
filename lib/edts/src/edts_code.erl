@@ -587,7 +587,7 @@ get_function_body(M, F, A) ->
 -spec get_fun_body( M :: module(), F :: function(), A :: integer()
                   , ModSrc :: string(), AbstractCode :: any()) ->
                       {ok, tuple()} | {error, any()}.
-get_fun_body(_M, F, A, _CurFile, [{function, L, F, A, _C} = Fun|_T]) ->
+get_fun_body(_M, F, A, _CurFile, [{function, _L, F, A, _C} = Fun|_T]) ->
   {ok, Fun};
 get_fun_body(M, F, A, CurFile, [_H|T])                                ->
   get_fun_body(M, F, A, CurFile, T);
