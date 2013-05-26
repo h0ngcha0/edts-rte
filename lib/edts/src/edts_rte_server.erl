@@ -55,13 +55,18 @@
 -define(SERVER, ?MODULE).
 -define(RCDTBL, edts_rte_record_table).
 
+-record(mfa_info, { fun_form      = undefined :: term()  %% FIXME
+                  , clauses_lines = undefined :: term()  %% FIXME
+                  , bindings      = []        :: binding()
+                  }).
+
 -record(dbg_state, { proc         = unattached :: unattached | pid()
                    , bindings     = []         :: binding()
                    , mfa          = {}         :: {} | tuple()
                    , record_table = undefined
                    , depth        = 0          :: non_neg_integer()
                    , line         = undefined  :: non_neg_integer() | undefined
-                   , mfa_form_map = undefined  :: dict()
+                   , mfa_info     = undefined  :: dict()  %% key: {m,f,a,depth}
                    , subfuns      = []         :: list()
                    }).
 
@@ -154,13 +159,13 @@ handle_call({rte_run, Module, Fun, Args0}, _From, State) ->
   io:format("rte_run: after setbreakpoint~n"),
   Pid      = erlang:spawn(Module, Fun, ArgsTerm),
   io:format("called function pid:~p~n", [Pid]),
-  {reply, {ok, finished}, State#dbg_state{ proc         = Pid
-                                         , bindings     = []
-                                         , mfa          = {Module, Fun, Arity}
-                                         , line         = undefined
-                                         , depth        = 0
-                                         , mfa_form_map = dict:new()
-                                         , subfuns      = []
+  {reply, {ok, finished}, State#dbg_state{ proc     = Pid
+                                         , bindings = []
+                                         , mfa      = {Module, Fun, Arity}
+                                         , line     = undefined
+                                         , depth    = 0
+                                         , mfa_info = dict:new()
+                                         , subfuns  = []
                                          }}.
 
 %%------------------------------------------------------------------------------
@@ -197,13 +202,12 @@ handle_cast({send_binding, {break_at, Bindings, Module, Line, Depth}}, State) ->
 
   MFA = new_mfa(State, Module, Line, Depth),
 
-  MFAFormMap0 = update_mfa_form_map( State#dbg_state.mfa_form_map
-                                   , MFA, Depth, Line),
+  MFAInfo0 = update_mfa_info(State#dbg_state.mfa_info, MFA, Depth, Line),
 
   %% get mfa and add one level if it is not main function
   %% output sub function body when the process leaves it.
   %% Only step into one more depth right now.
-  {Result, MFAFormMap, FunBody} =
+  {Result, MFAInfo, FunBody} =
     case State#dbg_state.depth > Depth of
       true  ->
         io:format( "in send_binding...:~n mfa:~p~nbinding:~p~nDepth:~p~n"
@@ -212,14 +216,14 @@ handle_cast({send_binding, {break_at, Bindings, Module, Line, Depth}}, State) ->
         ReplacedFun = replace_fun_body( State#dbg_state.bindings
                                       , State#dbg_state.mfa
                                       , State#dbg_state.depth
-                                      , MFAFormMap0),
+                                      , MFAInfo0),
         io:format("after replaced fun~n"),
-        MFAFormMap1 = cleanup_exec_clauses_linum( State#dbg_state.mfa
-                                                , State#dbg_state.depth
-                                                , MFAFormMap0),
-        {true, MFAFormMap1, ReplacedFun};
+        MFAInfo1 = cleanup_exec_clauses_linum( State#dbg_state.mfa
+                                             , State#dbg_state.depth
+                                             , MFAInfo0),
+        {true, MFAInfo1, ReplacedFun};
       false ->
-        {false, MFAFormMap0, undefined}
+        {false, MFAInfo0, undefined}
     end,
 
   io:format("old mfa:~p~n", [State#dbg_state.mfa]),
@@ -239,18 +243,17 @@ handle_cast({send_binding, {break_at, Bindings, Module, Line, Depth}}, State) ->
 
   %% save current bindings for further use
   {noreply, State#dbg_state{ bindings = Bindings, mfa = MFA
-                             , depth = Depth, line = Line
-                             , mfa_form_map = MFAFormMap
-                             , subfuns = SubFuns}};
+                           , depth = Depth, line = Line
+                           , mfa_info = MFAInfo
+                           , subfuns = SubFuns}};
 handle_cast(exit, #dbg_state{bindings = Bindings, line = Line} = State) ->
   io:format( "in exit...:~n mfa:~p~nbinding:~p~n"
            , [State#dbg_state.mfa, Bindings]),
   {M, F, A} = MFA = State#dbg_state.mfa,
-  MFAFormMap = update_mfa_form_map( State#dbg_state.mfa_form_map
-                                  , MFA, 2, Line),
+  MFAInfo   = update_mfa_info(State#dbg_state.mfa_info, MFA, 2, Line),
 
   SubFuns = concat_sub_funs(State#dbg_state.subfuns),
-  ReplacedFun = replace_fun_body(Bindings, MFA, 2, MFAFormMap),
+  ReplacedFun = replace_fun_body(Bindings, MFA, 2, MFAInfo),
 
   Fs = make_comments(M, F, A) ++
        ReplacedFun            ++ "\n" ++
@@ -293,17 +296,18 @@ new_mfa(State, Module, Line, Depth) ->
       State#dbg_state.mfa
   end.
 
-replace_fun_body(Bindings, MFA, D, MFAFormMap) ->
+replace_fun_body(Bindings, MFA, D, MFAInfo) ->
   MFAD = erlang:append_element(MFA, D),
-  io:format("MFAD is:~p~n, MFAFormMap is:~p~n", [MFAD, MFAFormMap]),
-  {FunAbsForm, AllClausesLn} = dict:fetch(MFAD, MFAFormMap),
+  io:format("MFAD is:~p~n, MFAInfo is:~p~n", [MFAD, MFAInfo]),
+  #mfa_info{fun_form = FunAbsForm, clauses_lines = AllClausesLn}
+    = dict:fetch(MFAD, MFAInfo),
   edts_rte_erlang:var_to_val_in_fun(FunAbsForm, AllClausesLn, Bindings).
 
-cleanup_exec_clauses_linum(MFA, D, MFAFormMap) ->
+cleanup_exec_clauses_linum(MFA, D, MFAInfo) ->
   MFAD = erlang:append_element(MFA, D),
-  case dict:is_key(MFAD, MFAFormMap) of
-    true  -> dict:erase(MFAD, MFAFormMap);
-    false -> MFAFormMap
+  case dict:is_key(MFAD, MFAInfo) of
+    true  -> dict:erase(MFAD, MFAInfo);
+    false -> MFAInfo
   end.
 
 concat_sub_funs(SubFuns) ->
@@ -357,22 +361,23 @@ mk_editor(Id, FunBody) ->
 %% if the clauses are unfortunately programmed in the same line
 %% then rte shall feel confused and refuse to display any value of
 %% the variables.
-update_mfa_form_map(MFAFormMap, {M, F, A}, D, Line) ->
-  case dict:is_key({M, F, A, D}, MFAFormMap) of
+update_mfa_info(MFAInfo, {M, F, A}, D, Line) ->
+  case dict:is_key({M, F, A, D}, MFAInfo) of
     true  ->
-      {FunAbsForm, AllClausesLn} =
-        dict:fetch({M, F, A, D}, MFAFormMap),
+      Val = #mfa_info{fun_form = FunAbsForm, clauses_lines = AllClausesLn} =
+        dict:fetch({M, F, A, D}, MFAInfo),
+      TraversedLns = edts_rte_erlang:traverse_clause_struct(Line, AllClausesLn),
       dict:store( {M, F, A, D}
-                , { FunAbsForm
-                  , edts_rte_erlang:traverse_clause_struct(Line, AllClausesLn)
-                  }
-                , MFAFormMap);
+                , Val#mfa_info{clauses_lines = TraversedLns}
+                , MFAInfo);
     false ->
       {ok, FunAbsForm} = edts_code:get_function_body(M, F, A),
       AllClausesLn     = edts_rte_erlang:extract_fun_clauses_line_num(
                            FunAbsForm),
       io:format("====== new mfaform key:~p~n", [{M, F, A, D}]),
-      dict:store({M, F, A, D}, {FunAbsForm, AllClausesLn}, MFAFormMap)
+      dict:store( {M, F, A, D}
+                , #mfa_info{fun_form = FunAbsForm, clauses_lines = AllClausesLn}
+                , MFAInfo)
   end.
 
 %%%_* Unit tests ===============================================================
