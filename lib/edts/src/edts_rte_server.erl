@@ -55,7 +55,8 @@
 -define(SERVER, ?MODULE).
 -define(RCDTBL, edts_rte_record_table).
 
--record(mfa_info, { fun_form      = undefined :: term()  %% FIXME
+-record(mfa_info, { mfad          = undefined :: {atom(), atom(), integer(), integer()}
+                  , fun_form      = undefined :: term()  %% FIXME
                   , clauses_lines = undefined :: term()  %% FIXME
                   , bindings      = []        :: binding()
                   }).
@@ -66,7 +67,7 @@
                    , record_table = undefined
                    , depth        = 0          :: non_neg_integer()
                    , line         = undefined  :: non_neg_integer() | undefined
-                   , mfa_info     = undefined  :: dict()  %% key: {m,f,a,depth}
+                   , mfa_info     = []         :: list()  %% key: {m,f,a,depth}
                    , subfuns      = []         :: list()
                    }).
 
@@ -164,7 +165,7 @@ handle_call({rte_run, Module, Fun, Args0}, _From, State) ->
                                          , mfa      = {Module, Fun, Arity}
                                          , line     = undefined
                                          , depth    = 0
-                                         , mfa_info = dict:new()
+                                         , mfa_info = []
                                          , subfuns  = []
                                          }}.
 
@@ -202,13 +203,14 @@ handle_cast({send_binding, {break_at, Bindings, Module, Line, Depth}}, State) ->
 
   MFA = new_mfa(State, Module, Line, Depth),
 
-  MFAInfo0 = update_mfa_info( State#dbg_state.mfa_info, MFA, Depth
-                            , Line, {ok, Bindings}),
+  MFAInfo0 = State#dbg_state.mfa_info,
+
+  io:format("mfa info........... before ~p~n", [MFAInfo0]),
 
   %% get mfa and add one level if it is not main function
   %% output sub function body when the process leaves it.
   %% Only step into one more depth right now.
-  {Result, MFAInfo, FunBody} =
+  {Result, MFAInfo2, FunBody} =
     case State#dbg_state.depth > Depth of
       true  ->
         io:format( "in send_binding...:~n mfa:~p~nbinding:~p~nDepth:~p~n"
@@ -227,9 +229,13 @@ handle_cast({send_binding, {break_at, Bindings, Module, Line, Depth}}, State) ->
         {false, MFAInfo0, undefined}
     end,
 
+  MFAInfo = update_mfa_info( MFAInfo2, MFA, Depth
+                           , Line, {ok, Bindings}),
   io:format("old mfa:~p~n", [State#dbg_state.mfa]),
   io:format("new mfa:~p~n", [MFA]),
   edts_rte_int_listener:step(),
+
+  io:format("mfa info........... after ~p~n", [MFAInfo]),
 
   SubFuns =
     case Result of
@@ -260,8 +266,8 @@ handle_cast(exit, #dbg_state{ bindings = Bindings, line = Line} = State) ->
        ReplacedFun            ++ "\n" ++
        SubFuns,
   io:format("all functions:~p~n", [Fs]),
-  io:format( "...............all mfa info keys:~p~n"
-           , [dict:fetch_keys(MFAInfo)]),
+  %% io:format( "...............all mfa info keys:~p~n"
+  %%          , [dict:fetch_keys(MFAInfo)]),
   send_fun(M, F, A, Fs),
   {noreply, State};
 handle_cast(_Msg, State) ->
@@ -302,15 +308,15 @@ new_mfa(State, Module, Line, Depth) ->
 replace_fun_body(Bindings, MFA, D, MFAInfo) ->
   MFAD = erlang:append_element(MFA, D),
   io:format("MFAD is:~p~n, MFAInfo is:~p~n", [MFAD, MFAInfo]),
-  #mfa_info{fun_form = FunAbsForm, clauses_lines = AllClausesLn}
-    = dict:fetch(MFAD, MFAInfo),
+  #mfa_info{mfad = MFAD, fun_form = FunAbsForm, clauses_lines = AllClausesLn}
+    = hd(MFAInfo),
   edts_rte_erlang:var_to_val_in_fun(FunAbsForm, AllClausesLn, Bindings).
 
 cleanup_exec_clauses_linum(MFA, D, MFAInfo) ->
+  io:format("clean...........~n"),
   MFAD = erlang:append_element(MFA, D),
-  case dict:is_key(MFAD, MFAInfo) of
-    true  -> dict:erase(MFAD, MFAInfo);
-    false -> MFAInfo
+  case is_key(MFAD, MFAInfo) of
+    true  -> tl(MFAInfo)
   end.
 
 concat_sub_funs(SubFuns) ->
@@ -365,30 +371,44 @@ mk_editor(Id, FunBody) ->
 %% then rte shall feel confused and refuse to display any value of
 %% the variables.
 update_mfa_info(MFAInfo, {M, F, A}, D, Line, MaybeUpdateBindings) ->
-  case dict:is_key({M, F, A, D}, MFAInfo) of
+  io:format("update.......~n"),
+  Key = {M, F, A, D},
+  case is_key(Key, MFAInfo) of
     true  ->
-      Val = #mfa_info{ fun_form = FunAbsForm, clauses_lines = AllClausesLn
-                     , bindings = Bindings0} =
-        dict:fetch({M, F, A, D}, MFAInfo),
+      {{ok, Val0}, T} = get_hd(MFAInfo),
+      #mfa_info{ mfad = Key, fun_form = FunAbsForm, clauses_lines = AllClausesLn
+               , bindings = Bindings0} = Val0,
       TraversedLns = edts_rte_erlang:traverse_clause_struct(Line, AllClausesLn),
-      dict:store( {M, F, A, D}
-                , Val#mfa_info{ clauses_lines = TraversedLns
-                              , bindings      = case MaybeUpdateBindings of
-                                                  {ok, Bindings} -> Bindings;
-                                                  false          -> Bindings0
-                                                end
-                              }
-                , MFAInfo);
+      Val = Val0#mfa_info{ clauses_lines = TraversedLns
+                         , bindings      = case MaybeUpdateBindings of
+                                             {ok, Bindings} -> Bindings;
+                                             false          -> Bindings0
+                                           end
+                         },
+      io:format("appended fun:~p~n", [Val]),
+      [Val | T];
     false ->
       {ok, FunAbsForm} = edts_code:get_function_body(M, F, A),
       AllClausesLn     = edts_rte_erlang:extract_fun_clauses_line_num(
                            FunAbsForm),
       io:format("====== new mfaform key:~p~n", [{M, F, A, D}]),
-      dict:store( {M, F, A, D}
-                , #mfa_info{ fun_form = FunAbsForm, clauses_lines = AllClausesLn
-                           , bindings = []}
-                , MFAInfo)
+      Val = #mfa_info{ mfad = Key, fun_form = FunAbsForm, clauses_lines = AllClausesLn
+                     , bindings = []},
+      [Val | MFAInfo]
   end.
+
+is_key(Key, MFAInfo) ->
+  case get_hd(MFAInfo) of
+    {false, _} ->
+      false;
+    {{ok, MFAInfo0}, _} ->
+      MFAInfo0#mfa_info.mfad =:= Key
+  end.
+  
+get_hd([]) ->
+  {false, []};
+get_hd([H | T]) ->
+  {{ok, H}, T}.
 
 %%%_* Unit tests ===============================================================
 
