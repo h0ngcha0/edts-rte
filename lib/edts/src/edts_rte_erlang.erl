@@ -606,10 +606,7 @@ replace_var_with_val_in_expr(Expr, _ECLn, _Bs)                            ->
 
 replace_var_with_val({var, L, VariableName}, Bs) ->
   Value = proplists:get_value(VariableName, Bs),
-  io:format("VarName:~p   L:~p    Val:~p~n", [VariableName, L, Value]),
-  Val = do_replace(Value, L),
-  io:format("replaced Var:~p~n", [Val]),
-  Val;
+  do_replace(Value, L);
 replace_var_with_val(Other, _Bs)                 ->
   Other.
 

@@ -214,10 +214,10 @@ handle_cast({send_binding, {break_at, Bindings, Module, Line, Depth}}, State) ->
                                       , State#dbg_state.depth
                                       , MFAFormMap0),
         io:format("after replaced fun~n"),
-        Rs = cleanup_exec_clauses_linum( State#dbg_state.mfa
-                                       , State#dbg_state.depth
-                                       , MFAFormMap0),
-        {ok, Rs, ReplacedFun};
+        MFAFormMap1 = cleanup_exec_clauses_linum( State#dbg_state.mfa
+                                                , State#dbg_state.depth
+                                                , MFAFormMap0),
+        {true, MFAFormMap1, ReplacedFun};
       false ->
         {false, MFAFormMap0, undefined}
     end,
@@ -228,7 +228,7 @@ handle_cast({send_binding, {break_at, Bindings, Module, Line, Depth}}, State) ->
 
   SubFuns =
     case Result of
-      ok ->
+      true  ->
         {M0, F0, A0} = State#dbg_state.mfa,
         Sf = [M0, F0, A0, FunBody],
         Funs = [Sf] ++ State#dbg_state.subfuns,
@@ -301,8 +301,10 @@ replace_fun_body(Bindings, MFA, D, MFAFormMap) ->
 
 cleanup_exec_clauses_linum(MFA, D, MFAFormMap) ->
   MFAD = erlang:append_element(MFA, D),
-  {FunAbsForm, _AllClausesLn} = dict:fetch(MFAD, MFAFormMap),
-  dict:store(MFAD, {FunAbsForm, []}, MFAFormMap).
+  case dict:is_key(MFAD, MFAFormMap) of
+    true  -> dict:erase(MFAD, MFAFormMap);
+    false -> MFAFormMap
+  end.
 
 concat_sub_funs(SubFuns) ->
   lists:foldl(
@@ -356,27 +358,20 @@ mk_editor(Id, FunBody) ->
 %% then rte shall feel confused and refuse to display any value of
 %% the variables.
 update_mfa_form_map(MFAFormMap, {M, F, A}, D, Line) ->
-  io:format("start in update_mfa~n"),
   case dict:is_key({M, F, A, D}, MFAFormMap) of
     true  ->
-      io:format("update_mfa true~n"),
       {FunAbsForm, AllClausesLn} =
         dict:fetch({M, F, A, D}, MFAFormMap),
-      %% try to touch the clause structs
-      io:format("update_mfa after fetch~n"),
-      S = dict:store( {M, F, A, D}
+      dict:store( {M, F, A, D}
                 , { FunAbsForm
                   , edts_rte_erlang:traverse_clause_struct(Line, AllClausesLn)
                   }
-                , MFAFormMap),
-      io:format("update_mfa true, after store~n"),
-      S;
+                , MFAFormMap);
     false ->
-      io:format("update_mfa false~n"),
       {ok, FunAbsForm} = edts_code:get_function_body(M, F, A),
       AllClausesLn     = edts_rte_erlang:extract_fun_clauses_line_num(
                            FunAbsForm),
-      io:format("update_mfa before store~n"),
+      io:format("====== new mfaform key:~p~n", [{M, F, A, D}]),
       dict:store({M, F, A, D}, {FunAbsForm, AllClausesLn}, MFAFormMap)
   end.
 
