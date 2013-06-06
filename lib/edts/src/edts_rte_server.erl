@@ -212,11 +212,20 @@ handle_cast({send_binding, {break_at, Bindings, Module, Line, Depth}},State0) ->
 
   io:format("mfa info........... before ~p~n", [State#dbg_state.mfa_info]),
 
+  %% Either the new Depth is smaller, which means that we step out of
+  %% a calling function, or depth is the same as before, but the function
+  %% name is changed. The latter case is the result of a bug in int
+  %% module, when the function call is the last expression of a function
+  %% the depth is not changed.
+  SendFunP = (State#dbg_state.depth > Depth) orelse
+               (State#dbg_state.depth =:= Depth andalso
+                  MFA =/= State#dbg_state.mfa),
+
   %% get mfa and add one level if it is not main function
   %% output sub function body when the process leaves it.
   %% Only step into one more depth right now.
   {SubFuns, MFAInfo1} =
-    case State#dbg_state.depth > Depth of
+    case SendFunP of
       true  ->
         io:format( "in send_binding...:~n mfa:~p~nbinding:~p~nDepth:~p~n"
                  , [State#dbg_state.mfa, State#dbg_state.bindings, Depth]),
