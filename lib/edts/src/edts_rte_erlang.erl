@@ -71,7 +71,7 @@ extract_clauses_line_num([]) ->
   [];
 extract_clauses_line_num([{clause,L,_ArgList0,_WhenList0,Exprs0}|T]) ->
   ExprsLn = extract_exprs_line_num(Exprs0),
-  [ #clause_struct{line = L, sub_clause = lists:reverse(ExprsLn)}
+  [ #clause_struct{line = L, sub_clause = ExprsLn}
   | extract_clauses_line_num(T)].
 
 extract_exprs_line_num(Exprs) ->

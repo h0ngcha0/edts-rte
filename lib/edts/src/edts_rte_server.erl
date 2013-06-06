@@ -244,8 +244,7 @@ handle_cast({send_binding, {break_at, Bindings, Module, Line, Depth}},State0) ->
         {State#dbg_state.subfuns, State#dbg_state.mfa_info}
     end,
 
-  MFAInfo = update_mfa_info( MFAInfo1, MFA, Depth
-                           , Line, {ok, Bindings}),
+  MFAInfo = update_mfa_info( MFAInfo1, MFA, Depth, Line, Bindings),
   io:format("old mfa:~p~n", [State#dbg_state.mfa]),
   io:format("new mfa:~p~n", [MFA]),
   edts_rte_int_listener:step(),
@@ -261,7 +260,7 @@ handle_cast(exit, #dbg_state{ bindings = Bindings, line = Line} = State) ->
   io:format( "in exit...:~n mfa:~p~nbinding:~p~n"
            , [State#dbg_state.mfa, Bindings]),
   {M, F, A} = MFA = State#dbg_state.mfa,
-  MFAInfo   = update_mfa_info(State#dbg_state.mfa_info, MFA, 2, Line, false),
+  MFAInfo   = update_mfa_info(State#dbg_state.mfa_info, MFA, 2, Line, []),
 
   SubFuns = concat_sub_funs(State#dbg_state.subfuns),
   ReplacedFun = replace_var_in_fun_body(Bindings, MFA, 2, MFAInfo),
@@ -401,21 +400,17 @@ mk_editor(Id, FunBody) ->
 %% @doc if the clauses are unfortunately programmed in the same line
 %% then rte shall feel confused and refuse to display any value of
 %% the variables.
-update_mfa_info(MFAInfo, {M, F, A}, D, Line, MaybeUpdateBindings) ->
+update_mfa_info(MFAInfo, {M, F, A}, D, Line, Bindings) ->
   io:format("update.......~n"),
   Key = {M, F, A, D},
   case is_key_of_hd_elem(Key, MFAInfo) of
     true  ->
       {ok, Val0} = get_hd(MFAInfo),
       #mfa_info{ mfad          = Key
-               , clauses_lines = AllClausesLn
-               , bindings      = Bindings0} = Val0,
+               , clauses_lines = AllClausesLn} = Val0,
       TraversedLns = edts_rte_erlang:traverse_clause_struct(Line, AllClausesLn),
       Val = Val0#mfa_info{ clauses_lines = TraversedLns
-                         , bindings      = case MaybeUpdateBindings of
-                                             {ok, Bindings} -> Bindings;
-                                             false          -> Bindings0
-                                           end
+                         , bindings      = Bindings
                          },
       io:format("appended fun:~p~n", [Val]),
       [Val | tl(MFAInfo)];
