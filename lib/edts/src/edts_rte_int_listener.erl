@@ -287,17 +287,17 @@ handle_call(continue, From, #dbg_state{proc = Pid} = State) ->
   int:continue(Pid),
   io:format("after int:continue. pid~p~n", [Pid]),
   Listeners = State#dbg_state.listeners,
-  {noreply, State#dbg_state{listeners = [From|Listeners]}};
+  {noreply, State#dbg_state{listeners = add_to_ulist(From, Listeners)}};
 
 handle_call(step, From, #dbg_state{proc = Pid} = State) ->
   int:step(Pid),
   Listeners = State#dbg_state.listeners,
-  {noreply, State#dbg_state{listeners = [From|Listeners]}};
+  {noreply, State#dbg_state{listeners = add_to_ulist(From, Listeners)}};
 
 handle_call(step_out, From, #dbg_state{proc = Pid} = State) ->
   int:finish(Pid),
   Listeners = State#dbg_state.listeners,
-  {noreply, State#dbg_state{listeners = [From|Listeners]}};
+  {noreply, State#dbg_state{listeners = add_to_ulist(From, Listeners)}};
 
 handle_call(stop_debug, _From, #dbg_state{proc = Pid}) ->
   exit(Pid, kill),
@@ -443,6 +443,12 @@ get_safe_modules(ExcludedApps) ->
              not lists:prefix(ErlLibDir, Filename),
              not code:is_module_native(Module),
              not lists:member(filename:dirname(Filename), ExcludedAppDirs)].
+
+add_to_ulist(E, L) ->
+  case lists:member(E, L) of
+    true  -> L;
+    false -> [E|L]
+  end.
 
 %%%_* Unit tests ===============================================================
 

@@ -68,6 +68,7 @@
                    , line         = undefined  :: undefined | non_neg_integer()
                    , mfa_info     = []         :: [mfa_info()]
                    , subfuns      = []         :: list()  %% FIXME type
+                   , module_cache = []         :: list()  %% FIXME type
                    }).
 
 %%%_* Types ====================================================================
@@ -166,14 +167,15 @@ handle_call({rte_run, Module, Fun, Args0}, _From, State) ->
   io:format("rte_run: after setbreakpoint~n"),
   Pid      = erlang:spawn(Module, Fun, ArgsTerm),
   io:format("called function pid:~p~n", [Pid]),
-  {reply, {ok, finished}, State#dbg_state{ proc     = Pid
-                                         , bindings = []
-                                         , mfa      = {Module, Fun, Arity}
-                                         , line     = undefined
-                                         , depth    = 0
-                                         , mfa_info = []
-                                         , subfuns  = []
-                                         }}.
+  {reply, {okn, finished}, State#dbg_state{ proc         = Pid
+                                          , bindings     = []
+                                          , mfa          = {Module, Fun, Arity}
+                                          , line         = undefined
+                                          , depth        = 0
+                                          , mfa_info     = []
+                                          , subfuns      = []
+                                          , module_cache = []
+                                          }}.
 
 %%------------------------------------------------------------------------------
 %% @private
@@ -202,12 +204,11 @@ handle_cast({finished_attach, Pid}, State) ->
   io:format("finish attach.....~n"),
   {noreply, State};
 
-handle_cast({send_binding, {break_at, Bindings, Module, Line, Depth}}, State) ->
+handle_cast({send_binding, {break_at, Bindings, Module, Line, Depth}},State0) ->
+  {MFA, State} = get_mfa(State0, Module, Line),
   io:format( "send_binding......before step. old depth:~p , new_depth:~p~n"
            , [State#dbg_state.depth, Depth]),
   io:format("send_binding......Line:~p, Bindings:~p~n",[Line, Bindings]),
-
-  MFA = get_mfa(State, Module, Line, Depth),
 
   io:format("mfa info........... before ~p~n", [State#dbg_state.mfa_info]),
 
@@ -294,12 +295,34 @@ code_change(_OldVsn, State, _Extra) ->
 %% @doc Calculate the MFA based on the line number in the module name. If the
 %%      depth is not changed, it is assumed that we remain in the same function
 %%      as before, therefore there is no need to re-calculate.
-get_mfa(State, Module, Line, Depth) ->
-  case State#dbg_state.depth =:= Depth of
-    true  ->
-      State#dbg_state.mfa;
-    false ->
-      edts_rte_erlang:get_mfa_from_line(Module, Line)
+%%      NOTE:
+%%      There seems to be a problem with int module. If a function call is
+%%      involved in the last expression of a function, when the debugger
+%%      process step into the function call, the depth is not changed.
+%%
+%%      One way to work around this is to cache all the sorted function
+%%      info for a particular module and do not use the change of the depth
+%%      as the indicator that a new mfa should be calculated. It is too
+%%      expensive if no such caching is performed,
+get_mfa(State, Module, Line) ->
+  case orddict:find(Module, State#dbg_state.module_cache) of
+    error ->
+      ModFunInfo  = edts_rte_erlang:get_module_sorted_fun_info(Module),
+      NewModCache = orddict:store( Module, ModFunInfo
+                                 , State#dbg_state.module_cache),
+      [_L, F, A]  = find_function(Line, ModFunInfo),
+      {{Module, F, A}, State#dbg_state{module_cache = NewModCache}};
+    {ok, ModFunInfo} ->
+      [_L, F, A]  = find_function(Line, ModFunInfo),
+      {{Module, F, A}, State}
+  end.
+
+find_function(_L, [])                      ->
+  [];
+find_function(L, [[L0, _F, _A] = LFA | T]) ->
+  case L >= L0 of
+    true  -> LFA;
+    false -> find_function(L, T)
   end.
 
 replace_var_in_fun_body(Bindings, MFA, Depth, MFAInfo) ->
