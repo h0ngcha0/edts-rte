@@ -31,7 +31,7 @@
         , traverse_clause_struct/2
         , read_and_add_records/2
         , var_to_val_in_fun/3
-        , get_mfa_from_line/2
+        , get_module_sorted_fun_info/1
         ]).
 
 %%%_* Includes =================================================================
@@ -71,7 +71,7 @@ extract_clauses_line_num([]) ->
   [];
 extract_clauses_line_num([{clause,L,_ArgList0,_WhenList0,Exprs0}|T]) ->
   ExprsLn = extract_exprs_line_num(Exprs0),
-  [ #clause_struct{line = L, sub_clause = lists:reverse(ExprsLn)}
+  [ #clause_struct{line = L, sub_clause = ExprsLn}
   | extract_clauses_line_num(T)].
 
 extract_exprs_line_num(Exprs) ->
@@ -178,28 +178,17 @@ touch_clause(ClauseStruct, Line) ->
 read_and_add_records(Module, RT) ->
   read_and_add_records(Module, '_', [], [], RT).
 
-get_mfa_from_line(M, L0) ->
-  FAs = int:functions(M),
-  AllFuns = lists:foldl(
-    fun([F, A], AllFuns) ->
-        FunInfo = edts_code:get_function_info(M, F, A),
+get_module_sorted_fun_info(M) ->
+  FunAritys = int:functions(M),
+  AllLineFunAritys = lists:foldl(
+    fun([Fun, Arity], LineFunAritys) ->
+        FunInfo = edts_code:get_function_info(M, Fun, Arity),
         {line, Line} = lists:keyfind(line, 1, FunInfo),
-        [[Line, F, A] | AllFuns] end, [], FAs),
-  SortedAllFuns = lists:reverse(lists:sort(AllFuns)),
-  %% [Line, F, A]
-  [_L, F, A] = find_function(L0, SortedAllFuns),
-  {M, F, A}.
+        [[Line, Fun, Arity] | LineFunAritys]
+    end, [], FunAritys),
+  lists:reverse(lists:sort(AllLineFunAritys)).
 
 %%%_* Internal =================================================================
-
-find_function(_L, [])                    ->
-  [];
-find_function(L, [[L0, _F, _A] = LFA | T]) ->
-  case L >= L0 of
-    true  -> LFA;
-    false -> find_function(L, T)
-  end.
-
 read_and_add_records(Module, Selected, Options, Bs, RT) ->
   Info             = edts_code:get_module_info(Module, basic),
   {source, Source} = lists:keyfind(source, 1, Info),
