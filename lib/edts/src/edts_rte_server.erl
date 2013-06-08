@@ -203,14 +203,13 @@ handle_cast({finished_attach, Pid}, State) ->
   edts_rte_int_listener:step(),
   io:format("finish attach.....~n"),
   {noreply, State};
-
 handle_cast({send_binding, {break_at, Bindings, Module, Line, Depth}},State0) ->
   {MFA, State} = get_mfa(State0, Module, Line),
-  io:format( "send_binding......before step. old depth:~p , new_depth:~p~n"
+  io:format( "~nsend_binding......before step. old depth:~p , new_depth:~p~n"
            , [State#dbg_state.depth, Depth]),
   io:format("send_binding......Line:~p, Bindings:~p~n",[Line, Bindings]),
 
-  io:format("mfa info........... before ~p~n", [State#dbg_state.mfa_info]),
+  %%io:format("mfa info........... before ~p~n", [State#dbg_state.mfa_info]),
 
   %% Either the new Depth is smaller, which means that we step out of
   %% a calling function, or depth is the same as before, but the function
@@ -228,15 +227,15 @@ handle_cast({send_binding, {break_at, Bindings, Module, Line, Depth}},State0) ->
     case SendFunP of
       true  ->
         io:format( "in send_binding...:~n mfa:~p~nbinding:~p~nDepth:~p~n"
-                 , [State#dbg_state.mfa, State#dbg_state.bindings, Depth]),
+                   , [State#dbg_state.mfa, State#dbg_state.bindings, Depth]),
         %% Sub function call is finished, output subfunction body
         ReplacedFun = replace_var_in_fun_body( State#dbg_state.mfa
-                                             , State#dbg_state.depth
-                                             , State#dbg_state.mfa_info),
-        io:format("after replaced fun~n"),
+                                               , State#dbg_state.depth
+                                               , State#dbg_state.mfa_info),
+        %%io:format("after replaced fun~n"),
         MFAInfo0 = cleanup_mfa_info( State#dbg_state.mfa
-                                   , State#dbg_state.depth
-                                   , State#dbg_state.mfa_info),
+                                     , State#dbg_state.depth
+                                     , State#dbg_state.mfa_info),
         {M, F, A} = State#dbg_state.mfa,
         {[{M, F, A, ReplacedFun} | State#dbg_state.subfuns], MFAInfo0};
       false ->
@@ -248,13 +247,30 @@ handle_cast({send_binding, {break_at, Bindings, Module, Line, Depth}},State0) ->
   io:format("new mfa:~p~n", [MFA]),
   edts_rte_int_listener:step(),
 
-  io:format("mfa info........... after ~p~n", [MFAInfo]),
+  %% if the last sentence of a recursive call is like
+  %% M + do_add(M - 1), it might jump from current to the first depth
+  %% and we can not get all of the sub function bodies
+  SkipStack = State#dbg_state.depth - Depth > 1,
+  AllSubFuns = case SkipStack of
+                 true ->
+                   %% save skipped sub functions
+                   io:format("Into skipped process~n"),
+                   SkippedSubFuns = save_skipped_subfuns( MFAInfo1
+                                                          , [6, 5, 4, 3]
+                                                          , State#dbg_state.mfa),
+                   io:format("SkippedSubFuns:~p~n", [SkippedSubFuns]),
+                   SkippedSubFuns ++ SubFuns;
+                 false ->
+                   SubFuns
+               end,
+
+  %%io:format("mfa info........... after ~p~n", [MFAInfo]),
 
   %% save current bindings for further use
   {noreply, State#dbg_state{ bindings = Bindings, mfa = MFA
                            , depth = Depth, line = Line
                            , mfa_info = MFAInfo
-                           , subfuns = SubFuns}};
+                           , subfuns = AllSubFuns}};
 handle_cast(exit, #dbg_state{bindings = Bindings, line = Line} = State) ->
   io:format( "in exit...:~n mfa:~p~nbinding:~p~n"
            , [State#dbg_state.mfa, Bindings]),
@@ -274,6 +290,25 @@ handle_cast(exit, #dbg_state{bindings = Bindings, line = Line} = State) ->
   {noreply, State};
 handle_cast(_Msg, State) ->
   {noreply, State}.
+
+%% save skipped function bodies
+save_skipped_subfuns(_, [], _) ->
+  [];
+save_skipped_subfuns(MFAInfo, [HD | T], MFA) ->
+  {M, F, A} = MFA,
+  io:format(
+    "in save skipped, mfa is:~p, depth are:~p~nmfa info is:~p~n", 
+    [MFA, [HD | T], [MFAInfo]]),
+  ReplacedFun = replace_var_in_fun_body( MFA
+                                       , HD
+                                       , MFAInfo),
+  MFAInfo0 = cleanup_mfa_info( MFA
+                             , HD
+                             , MFAInfo),
+  SubMFAInfo = [{M, F, A, ReplacedFun}],
+  io:format("in save skipped, submfainfo is~p~n", [SubMFAInfo]),
+  save_skipped_subfuns(MFAInfo0, T, MFA) ++ SubMFAInfo.
+
 
 %%------------------------------------------------------------------------------
 %% @private
@@ -333,8 +368,8 @@ find_function(L, [[L0, _F, _A] = LFA | T]) ->
   end.
 
 replace_var_in_fun_body(MFA, Depth, MFAInfo) ->
-  io:format( "replace.......MFA is:~p~nDepth is: ~p~nMFAInfo is:~p~n"
-           , [MFA, Depth, MFAInfo]),
+  %%io:format( "replace.......MFA is:~p~nDepth is: ~p~nMFAInfo is:~p~n"
+  %%         , [MFA, Depth, MFAInfo]),
   #mfa_info{ mfad          = Key
            , bindings      = Bindings
            , fun_form      = FunAbsForm
@@ -425,7 +460,7 @@ update_mfa_info(MFAInfo, {M, F, A}, D, Line, Bindings) ->
                      , fun_form      = FunAbsForm
                      , clauses_lines = AllClausesLn
                      , bindings      = Bindings},
-      io:format("appended fun:~p~n", [Val]),
+      %%io:format("appended fun:~p~n", [Val]),
       [Val | MFAInfo]
   end.
 
