@@ -186,7 +186,7 @@ handle_call({rte_run, Module, Fun, Args0}, _From, State) ->
                                       {noreply, state(), Timeout::timeout()} |
                                       {stop, Reason::atom(), state()}.
 handle_info(Msg, State) ->
-  io:format("rte_server handle_info ...., Msg:~p~n", [Msg]),
+  %% io:format("rte_server handle_info ...., Msg:~p~n", [Msg]),
   {noreply, State}.
 
 %%------------------------------------------------------------------------------
@@ -230,8 +230,7 @@ handle_cast({send_binding, {break_at, Bindings, Module, Line, Depth}},State0) ->
         io:format( "in send_binding...:~n mfa:~p~nbinding:~p~nDepth:~p~n"
                  , [State#dbg_state.mfa, State#dbg_state.bindings, Depth]),
         %% Sub function call is finished, output subfunction body
-        ReplacedFun = replace_var_in_fun_body( State#dbg_state.bindings
-                                             , State#dbg_state.mfa
+        ReplacedFun = replace_var_in_fun_body( State#dbg_state.mfa
                                              , State#dbg_state.depth
                                              , State#dbg_state.mfa_info),
         io:format("after replaced fun~n"),
@@ -244,7 +243,7 @@ handle_cast({send_binding, {break_at, Bindings, Module, Line, Depth}},State0) ->
         {State#dbg_state.subfuns, State#dbg_state.mfa_info}
     end,
 
-  MFAInfo = update_mfa_info( MFAInfo1, MFA, Depth, Line, Bindings),
+  MFAInfo = update_mfa_info(MFAInfo1, MFA, Depth, Line, Bindings),
   io:format("old mfa:~p~n", [State#dbg_state.mfa]),
   io:format("new mfa:~p~n", [MFA]),
   edts_rte_int_listener:step(),
@@ -256,14 +255,14 @@ handle_cast({send_binding, {break_at, Bindings, Module, Line, Depth}},State0) ->
                            , depth = Depth, line = Line
                            , mfa_info = MFAInfo
                            , subfuns = SubFuns}};
-handle_cast(exit, #dbg_state{ bindings = Bindings, line = Line} = State) ->
+handle_cast(exit, #dbg_state{bindings = Bindings, line = Line} = State) ->
   io:format( "in exit...:~n mfa:~p~nbinding:~p~n"
            , [State#dbg_state.mfa, Bindings]),
   {M, F, A} = MFA = State#dbg_state.mfa,
-  MFAInfo   = update_mfa_info(State#dbg_state.mfa_info, MFA, 2, Line, []),
+  MFAInfo   = update_mfa_info(State#dbg_state.mfa_info, MFA, 2, Line, Bindings),
 
   SubFuns = concat_sub_funs(State#dbg_state.subfuns),
-  ReplacedFun = replace_var_in_fun_body(Bindings, MFA, 2, MFAInfo),
+  ReplacedFun = replace_var_in_fun_body(MFA, 2, MFAInfo),
 
   Fs = make_comments(M, F, A) ++
        ReplacedFun            ++ "\n" ++
@@ -333,9 +332,11 @@ find_function(L, [[L0, _F, _A] = LFA | T]) ->
     false -> find_function(L, T)
   end.
 
-replace_var_in_fun_body(Bindings, MFA, Depth, MFAInfo) ->
-  io:format("MFA is:~p~nDepth is: ~p~nMFAInfo is:~p~n", [MFA, Depth, MFAInfo]),
+replace_var_in_fun_body(MFA, Depth, MFAInfo) ->
+  io:format( "replace.......MFA is:~p~nDepth is: ~p~nMFAInfo is:~p~n"
+           , [MFA, Depth, MFAInfo]),
   #mfa_info{ mfad          = Key
+           , bindings      = Bindings
            , fun_form      = FunAbsForm
            , clauses_lines = AllClausesLn} = hd(MFAInfo),
   %% assert
@@ -412,17 +413,19 @@ update_mfa_info(MFAInfo, {M, F, A}, D, Line, Bindings) ->
       Val = Val0#mfa_info{ clauses_lines = TraversedLns
                          , bindings      = Bindings
                          },
-      io:format("appended fun:~p~n", [Val]),
       [Val | tl(MFAInfo)];
     false ->
       {ok, FunAbsForm} = edts_code:get_function_body(M, F, A),
-      AllClausesLn     = edts_rte_erlang:extract_fun_clauses_line_num(
+      AllClausesLn0    = edts_rte_erlang:extract_fun_clauses_line_num(
                            FunAbsForm),
+      AllClausesLn     = edts_rte_erlang:traverse_clause_struct(
+                           Line, AllClausesLn0),
       io:format("====== new mfaform key:~p~n", [{M, F, A, D}]),
       Val = #mfa_info{ mfad          = Key
                      , fun_form      = FunAbsForm
                      , clauses_lines = AllClausesLn
-                     , bindings      = []},
+                     , bindings      = Bindings},
+      io:format("appended fun:~p~n", [Val]),
       [Val | MFAInfo]
   end.
 
