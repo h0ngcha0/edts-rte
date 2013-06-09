@@ -216,6 +216,7 @@ handle_cast({send_binding, {break_at, Bindings, Module, Line, Depth}},State0) ->
   %% name is changed. The latter case is the result of a bug in int
   %% module, when the function call is the last expression of a function
   %% the depth is not changed.
+  %% print order is wrong
   SendFunP = (State#dbg_state.depth > Depth) orelse
                (State#dbg_state.depth =:= Depth andalso
                   MFA =/= State#dbg_state.mfa),
@@ -255,11 +256,10 @@ handle_cast({send_binding, {break_at, Bindings, Module, Line, Depth}},State0) ->
                  true ->
                    %% save skipped sub functions
                    io:format("Into skipped process~n"),
-                   SkippedSubFuns = save_skipped_subfuns( MFAInfo1
-                                                          , [6, 5, 4, 3]
-                                                          , State#dbg_state.mfa),
-                   io:format("SkippedSubFuns:~p~n", [SkippedSubFuns]),
-                   SkippedSubFuns ++ SubFuns;
+                   SkippedSubFuns = 
+                     save_skipped_subfuns( MFAInfo1
+                                         , [6, 5, 4, 3]),
+                   SubFuns ++ SkippedSubFuns;
                  false ->
                    SubFuns
                end,
@@ -276,7 +276,7 @@ handle_cast(exit, #dbg_state{bindings = Bindings, line = Line} = State) ->
            , [State#dbg_state.mfa, Bindings]),
   {M, F, A} = MFA = State#dbg_state.mfa,
   MFAInfo   = update_mfa_info(State#dbg_state.mfa_info, MFA, 2, Line, Bindings),
-
+  io:format("mfainfo is:~p~n", [MFAInfo]),
   SubFuns = concat_sub_funs(State#dbg_state.subfuns),
   ReplacedFun = replace_var_in_fun_body(MFA, 2, MFAInfo),
 
@@ -292,13 +292,12 @@ handle_cast(_Msg, State) ->
   {noreply, State}.
 
 %% save skipped function bodies
-save_skipped_subfuns(_, [], _) ->
+save_skipped_subfuns(_, []) ->
   [];
-save_skipped_subfuns(MFAInfo, [HD | T], MFA) ->
-  {M, F, A} = MFA,
-  io:format(
-    "in save skipped, mfa is:~p, depth are:~p~nmfa info is:~p~n", 
-    [MFA, [HD | T], [MFAInfo]]),
+save_skipped_subfuns(MFAInfo, [HD | T]) ->
+  {M, F, A, D} = element(2, hd(MFAInfo)),
+  MFA = {M, F, A},
+  %%io:format("mfa is:~p~n", [MFA0]),
   ReplacedFun = replace_var_in_fun_body( MFA
                                        , HD
                                        , MFAInfo),
@@ -307,7 +306,7 @@ save_skipped_subfuns(MFAInfo, [HD | T], MFA) ->
                              , MFAInfo),
   SubMFAInfo = [{M, F, A, ReplacedFun}],
   io:format("in save skipped, submfainfo is~p~n", [SubMFAInfo]),
-  save_skipped_subfuns(MFAInfo0, T, MFA) ++ SubMFAInfo.
+  SubMFAInfo ++ save_skipped_subfuns(MFAInfo0, T).
 
 
 %%------------------------------------------------------------------------------
