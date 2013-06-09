@@ -211,6 +211,9 @@ handle_cast({send_binding, {break_at, Bindings, Module, Line, Depth}},State0) ->
 
   %%io:format("mfa info........... before ~p~n", [State#dbg_state.mfa_info]),
 
+  io:format("old mfa:~p~n", [State#dbg_state.mfa]),
+  io:format("new mfa:~p~n", [MFA]),
+
   %% Either the new Depth is smaller, which means that we step out of
   %% a calling function, or depth is the same as before, but the function
   %% name is changed. The latter case is the result of a bug in int
@@ -227,25 +230,23 @@ handle_cast({send_binding, {break_at, Bindings, Module, Line, Depth}},State0) ->
   {SubFuns, MFAInfo1} =
     case SendFunP of
       true  ->
-        io:format( "in send_binding...:~n mfa:~p~nbinding:~p~nDepth:~p~n"
+        io:format( "in send_replacedfun...:~n mfa:~p~nbinding:~p~nDepth:~p~n"
                    , [State#dbg_state.mfa, State#dbg_state.bindings, Depth]),
         %% Sub function call is finished, output subfunction body
         ReplacedFun = replace_var_in_fun_body( State#dbg_state.mfa
                                                , State#dbg_state.depth
                                                , State#dbg_state.mfa_info),
-        %%io:format("after replaced fun~n"),
         MFAInfo0 = cleanup_mfa_info( State#dbg_state.mfa
                                      , State#dbg_state.depth
                                      , State#dbg_state.mfa_info),
         {M, F, A} = State#dbg_state.mfa,
+        io:format("what replacedfunc:~p~n", [ReplacedFun]),
         {[{M, F, A, ReplacedFun} | State#dbg_state.subfuns], MFAInfo0};
       false ->
         {State#dbg_state.subfuns, State#dbg_state.mfa_info}
     end,
 
   MFAInfo = update_mfa_info(MFAInfo1, MFA, Depth, Line, Bindings),
-  io:format("old mfa:~p~n", [State#dbg_state.mfa]),
-  io:format("new mfa:~p~n", [MFA]),
   edts_rte_int_listener:step(),
 
   %% if the last sentence of a recursive call is like
@@ -255,11 +256,16 @@ handle_cast({send_binding, {break_at, Bindings, Module, Line, Depth}},State0) ->
   AllSubFuns = case SkipStack of
                  true ->
                    %% save skipped sub functions
-                   io:format("Into skipped process~n"),
+                   SkippedDepths = 
+                     lists:reverse(
+                       lists:seq(Depth + 1, State#dbg_state.depth - 1)),
+                   io:format("Into Skipped, depths:~p~n", [SkippedDepths]),
                    SkippedSubFuns = 
-                     save_skipped_subfuns( MFAInfo1
-                                         , [6, 5, 4, 3]),
-                   SubFuns ++ SkippedSubFuns;
+                     output_skipped_subfuns( MFAInfo1
+                                           , SkippedDepths),
+                   Ff = SkippedSubFuns ++ SubFuns,
+                   io:format("funs after concat skipped:~p~n", [Ff]),
+                   Ff;
                  false ->
                    SubFuns
                end,
@@ -278,7 +284,10 @@ handle_cast(exit, #dbg_state{bindings = Bindings, line = Line} = State) ->
   MFAInfo   = update_mfa_info(State#dbg_state.mfa_info, MFA, 2, Line, Bindings),
   io:format("mfainfo is:~p~n", [MFAInfo]),
   SubFuns = concat_sub_funs(State#dbg_state.subfuns),
-  ReplacedFun = replace_var_in_fun_body(MFA, 2, MFAInfo),
+  io:format("subfuns after concat is:~p~n", [SubFuns]),
+  %% Depth of main function where the program exits is 2
+  MainFunDepth = 2,
+  ReplacedFun = replace_var_in_fun_body(MFA, MainFunDepth, MFAInfo),
 
   Fs = make_comments(M, F, A) ++
        ReplacedFun            ++ "\n" ++
@@ -292,9 +301,9 @@ handle_cast(_Msg, State) ->
   {noreply, State}.
 
 %% save skipped function bodies
-save_skipped_subfuns(_, []) ->
+output_skipped_subfuns(_, []) ->
   [];
-save_skipped_subfuns(MFAInfo, [HD | T]) ->
+output_skipped_subfuns(MFAInfo, [HD | T]) ->
   {M, F, A, D} = element(2, hd(MFAInfo)),
   MFA = {M, F, A},
   %%io:format("mfa is:~p~n", [MFA0]),
@@ -305,8 +314,8 @@ save_skipped_subfuns(MFAInfo, [HD | T]) ->
                              , HD
                              , MFAInfo),
   SubMFAInfo = [{M, F, A, ReplacedFun}],
-  io:format("in save skipped, submfainfo is~p~n", [SubMFAInfo]),
-  SubMFAInfo ++ save_skipped_subfuns(MFAInfo0, T).
+  io:format("in output skipped, submfainfo is~p~n", [SubMFAInfo]),
+  output_skipped_subfuns(MFAInfo0, T) ++ SubMFAInfo.
 
 
 %%------------------------------------------------------------------------------
