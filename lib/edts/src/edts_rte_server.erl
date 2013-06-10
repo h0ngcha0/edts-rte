@@ -417,8 +417,17 @@ mk_editor(Id, FunBody) ->
                   "{\"x\":74,\"y\":92,\"z\":1,\"id\":~p,\"code\":~p}"
                , [Id, FunBody])).
 
-is_tail_recursion() ->
-  false.
+is_tail_recursion(MFAInfo, NewKey, Line) ->
+    case get_hd(MFAInfo) of
+        false ->
+            false;
+        {ok, MFAInfo0} ->
+        io:format("MFAInfo0:~p~nLine~p~nNewKey~p~n",
+                  [MFAInfo0, Line, NewKey]),
+            lists:any(fun(Clause) ->
+                       Line =:= edts_rte_erlang:get_line_from_clause(Clause)
+                     end, MFAInfo0#mfa_info.clauses_lines)
+    end.
 
 %% @doc if the clauses are unfortunately programmed in the same line
 %% then rte shall feel confused and refuse to display any value of
@@ -431,8 +440,8 @@ update_mfa_info(MFAInfo, {M, F, A}, D, Line, Bindings) ->
   io:format("update mfainfo.......:~p~n", [MFAInfo]),
   Key = {M, F, A, D},
   io:format("key.......:~p~n", [Key]),
-  io:format("app_p.......:~p~n", [add_p(MFAInfo, Key)]),
-  case add_p(MFAInfo, Key) of
+  io:format("app_p.......:~p~n", [add_p(MFAInfo, Key, Line)]),
+  case add_p(MFAInfo, Key, Line) of
     true ->
       %% add new mfa_info
       {ok, FunAbsForm} = edts_code:get_function_body(M, F, A),
@@ -457,14 +466,16 @@ update_mfa_info(MFAInfo, {M, F, A}, D, Line, Bindings) ->
       [Val | tl(MFAInfo)]
   end.
 
-add_p(MFAInfo, NewKey) ->
+add_p(MFAInfo, NewKey, Line) ->
   IsKeyEqual = case get_hd(MFAInfo) of
                  false ->
                    false;
                  {ok, MFAInfo0} ->
                    MFAInfo0#mfa_info.mfad =:= NewKey
                end,
-  is_tail_recursion() or (not IsKeyEqual).
+  IsTailRecu = is_tail_recursion(MFAInfo, NewKey, Line),
+  io:format("is_tail_recursion is:~p~n", [IsTailRecu]),
+  IsTailRecu or (not IsKeyEqual).
 
 
 is_key_of_hd_elem(Key, MFAInfo) ->

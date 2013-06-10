@@ -28,6 +28,7 @@
 -export([ convert_list_to_term/2
         , expand_records/2
         , extract_fun_clauses_line_num/1
+        , get_line_from_clause/1
         , traverse_clause_struct/2
         , read_and_add_records/2
         , var_to_val_in_fun/3
@@ -58,6 +59,9 @@ convert_list_to_term(Arguments, _RT) ->
   {value, Value,_Bs} = Val,
   io:format("val:~p~n", [Value]),
   Value.
+
+get_line_from_clause(#clause_struct{line = Line}) ->
+  Line.
 
 expand_records(RT, E0) ->
   UsedRecords = used_record_defs(E0, RT),
