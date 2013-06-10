@@ -220,8 +220,6 @@ handle_cast({send_binding, {break_at, Bindings, Module, Line, Depth}},State0) ->
   %% module, when the function call is the last expression of a function
   %% the depth is not changed.
   SendFunP = (State#dbg_state.depth > Depth),
-               %% (State#dbg_state.depth =:= Depth andalso
-               %%    MFA =/= State#dbg_state.mfa),
 
   %% get mfa and add one level if it is not main function
   %% output sub function body when the process leaves it.
@@ -231,72 +229,22 @@ handle_cast({send_binding, {break_at, Bindings, Module, Line, Depth}},State0) ->
       true  ->
         io:format( "in send_replacedfun...:~n mfa:~p~nbinding:~p~nDepth:~p~n"
                    , [State#dbg_state.mfa, State#dbg_state.bindings, Depth]),
-        
+
         %% Pop function up till function's depth <= Depth
-        {OutputMFAInfo, RestMFAInfo} = 
+        {OutputMFAInfo, RestMFAInfo} =
           lists:splitwith(fun(MFAInfoS) ->
                               {M, F, A, D} = MFAInfoS#mfa_info.mfad,
                               D > Depth
-                          %% MFA1 = {M, F, A},
-                          %% case D > Depth of
-                          %%   true ->
-                          %%     %% pop up function
-                          %%     ReplacedFun = replace_var_in_fun_body1(MFA1,
-                          %%                                          , D
-                          %%                                          , MFAInfoS),
-                          %%     %% put replaced function into state.subfuns
-                          %%     io:format("what replacedfunc:~p~n", [ReplacedFun]),
-                          %%     {[{M, F, A, ReplacedFun} | State#dbg_state.subfuns]};
-                          %%     %% clean up mfainfo only when pop happens
-                          %%     MFAInfo0 = cleanup_mfa_info( MFA1
-                          %%                                , D
-                          %%                                , State#dbg_state.mfa_info);
-                          %%   false ->
-                          %%     do_nothing
-                          %% end
                           end, State#dbg_state.mfa_info),
         %% output function bodies
         OutputFuns = output_subfuns(OutputMFAInfo) ++ State#dbg_state.subfuns,
         {OutputFuns, RestMFAInfo};
-        %% %% Sub function call is finished, output subfunction body
-        %% ReplacedFun = replace_var_in_fun_body( State#dbg_state.mfa
-        %%                                        , State#dbg_state.depth
-        %%                                        , State#dbg_state.mfa_info),
-
-        %% %% clean up mfainfo only when pop happens
-        %% MFAInfo0 = cleanup_mfa_info( State#dbg_state.mfa
-        %%                              , State#dbg_state.depth
-        %%                              , State#dbg_state.mfa_info),
-        %% {M, F, A} = State#dbg_state.mfa,
-        %% io:format("what replacedfunc:~p~n", [ReplacedFun]),
-        %% {[{M, F, A, ReplacedFun} | State#dbg_state.subfuns], MFAInfo0};
       false ->
         {State#dbg_state.subfuns, State#dbg_state.mfa_info}
     end,
 
   MFAInfo = update_mfa_info(MFAInfo1, MFA, Depth, Line, Bindings),
   edts_rte_int_listener:step(),
-
-  %% if the last sentence of a recursive call is like
-  %% M + do_add(M - 1), it might jump from current to the first depth
-  %% and we can not get all of the sub function bodies
-  %% SkipStack = State#dbg_state.depth - Depth > 1,
-  %% AllSubFuns = case SkipStack of
-  %%                true ->
-  %%                  %% save skipped sub functions
-  %%                  SkippedDepths = 
-  %%                    lists:reverse(
-  %%                      lists:seq(Depth + 1, State#dbg_state.depth - 1)),
-  %%                  io:format("Into Skipped, depths:~p~n", [SkippedDepths]),
-  %%                  SkippedSubFuns = 
-  %%                    output_skipped_subfuns( MFAInfo1
-  %%                                          , SkippedDepths),
-  %%                  Ff = SkippedSubFuns ++ SubFuns,
-  %%                  io:format("funs after concat skipped:~p~n", [Ff]),
-  %%                  Ff;
-  %%                false ->
-  %%                  SubFuns
-  %%              end,
 
   %%io:format("mfa info........... after ~p~n", [MFAInfo]),
 
@@ -309,13 +257,6 @@ handle_cast(exit, #dbg_state{bindings = Bindings, line = Line} = State) ->
   %% io:format( "in exit...:~n mfa:~p~nbinding:~p~n"
   %%          , [State#dbg_state.mfa, Bindings]),
   {M, F, A} = MFA = State#dbg_state.mfa,
-  %% MFAInfo   = update_mfa_info(State#dbg_state.mfa_info, MFA, 2, Line, Bindings),
-  %% io:format("mfainfo is:~p~n", [MFAInfo]),
-  %% SubFuns = concat_sub_funs(State#dbg_state.subfuns),
-  %% io:format("subfuns after concat is:~p~n", [SubFuns]),
-  %% %% Depth of main function where the program exits is 2
-  %% MainFunDepth = 2,
-  %% ReplacedFun = replace_var_in_fun_body(MFA, MainFunDepth, MFAInfo),
 
   AllFuns = output_subfuns(State#dbg_state.mfa_info) ++ State#dbg_state.subfuns,
   AllFunsStr = concat_sub_funs(AllFuns),
@@ -333,7 +274,7 @@ handle_cast(_Msg, State) ->
 
 output_subfuns(MFAInfos) ->
   lists:foldl(
-    fun({MFAInfo0, Funs}) ->
+    fun(MFAInfo0, Funs) ->
            {M, F, A, D} = MFAInfo0#mfa_info.mfad,
            MFA = {M, F, A},
            ReplacedFun = replace_var_in_fun_body1(MFA
@@ -487,10 +428,11 @@ update_mfa_info(MFAInfo, {M, F, A}, D, Line, Bindings) ->
   %%    add new mfainfo
   %% else
   %%    updae mfainfo
-  io:format("update mfainfo.......~n"),
+  io:format("update mfainfo.......:~p~n", [MFAInfo]),
   Key = {M, F, A, D},
-  LastKey = (hd(MFAInfo))#mfa_info.mfad,
-  case is_tail_recursion() or LastKey =/= Key of
+  io:format("key.......:~p~n", [Key]),
+  io:format("app_p.......:~p~n", [add_p(MFAInfo, Key)]),
+  case add_p(MFAInfo, Key) of
     true ->
       %% add new mfa_info
       {ok, FunAbsForm} = edts_code:get_function_body(M, F, A),
@@ -513,32 +455,17 @@ update_mfa_info(MFAInfo, {M, F, A}, D, Line, Bindings) ->
                          , bindings      = Bindings
                          },
       [Val | tl(MFAInfo)]
-  
-  %% case is_key_of_hd_elem(Key, MFAInfo) of
-  %%   true  ->
-  %%     {ok, Val0} = get_hd(MFAInfo),
-  %%     #mfa_info{ mfad          = Key
-  %%              , clauses_lines = AllClausesLn} = Val0,
-  %%     TraversedLns = edts_rte_erlang:traverse_clause_struct(Line, AllClausesLn),
-  %%     Val = Val0#mfa_info{ clauses_lines = TraversedLns
-  %%                        , bindings      = Bindings
-  %%                        },
-  %%     [Val | tl(MFAInfo)];
-  %%   false ->
-  %%     {ok, FunAbsForm} = edts_code:get_function_body(M, F, A),
-  %%     AllClausesLn0    = edts_rte_erlang:extract_fun_clauses_line_num(
-  %%                          FunAbsForm),
-  %%     AllClausesLn     = edts_rte_erlang:traverse_clause_struct(
-  %%                          Line, AllClausesLn0),
-  %%     io:format("====== new mfaform key:~p~n", [{M, F, A, D}]),
-  %%     Val = #mfa_info{ mfad          = Key
-  %%                    , fun_form      = FunAbsForm
-  %%                    , clauses_lines = AllClausesLn
-  %%                    , bindings      = Bindings},
-  %%     %%io:format("appended fun:~p~n", [Val]),
-  %%     [Val | MFAInfo]
-  %% end.
   end.
+
+add_p(MFAInfo, NewKey) ->
+  IsKeyEqual = case get_hd(MFAInfo) of
+                 false ->
+                   false;
+                 {ok, MFAInfo0} ->
+                   MFAInfo0#mfa_info.mfad =:= NewKey
+               end,
+  is_tail_recursion() or (not IsKeyEqual).
+
 
 is_key_of_hd_elem(Key, MFAInfo) ->
   case get_hd(MFAInfo) of
