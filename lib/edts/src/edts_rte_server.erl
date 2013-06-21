@@ -214,18 +214,11 @@ handle_cast({send_binding, {break_at, Bindings, Module, Line, Depth}},State0) ->
   io:format("old mfa:~p~n", [State#dbg_state.mfa]),
   io:format("new mfa:~p~n", [MFA]),
 
-  %% Either the new Depth is smaller, which means that we step out of
-  %% a calling function, or depth is the same as before, but the function
-  %% name is changed. The latter case is the result of a bug in int
-  %% module, when the function call is the last expression of a function
-  %% the depth is not changed.
-  SendFunP = (State#dbg_state.depth > Depth),
-
   %% get mfa and add one level if it is not main function
   %% output sub function body when the process leaves it.
   %% Only step into one more depth right now.
   {SubFuns, MFAInfo1} =
-    case SendFunP of
+    case State#dbg_state.depth > Depth of
       true  ->
         io:format( "in send_replacedfun...:~n mfa:~p~nbinding:~p~nDepth:~p~n"
                    , [State#dbg_state.mfa, State#dbg_state.bindings, Depth]),
@@ -233,7 +226,7 @@ handle_cast({send_binding, {break_at, Bindings, Module, Line, Depth}},State0) ->
         %% Pop function up till function's depth <= Depth
         {OutputMFAInfo, RestMFAInfo} =
           lists:splitwith(fun(MFAInfoS) ->
-                              {M, F, A, D} = MFAInfoS#mfa_info.mfad,
+                              {_M, _F, _A, D} = MFAInfoS#mfa_info.mfad,
                               D > Depth
                           end, State#dbg_state.mfa_info),
         %% output function bodies
@@ -243,7 +236,11 @@ handle_cast({send_binding, {break_at, Bindings, Module, Line, Depth}},State0) ->
         {State#dbg_state.subfuns, State#dbg_state.mfa_info}
     end,
 
-  MFAInfo = update_mfa_info(MFAInfo1, MFA, Depth, Line, Bindings),
+  PreviousLine  = State#dbg_state.line,
+  PreviousDepth = State#dbg_state.depth,
+  MFAInfo = update_mfa_info( MFAInfo1, MFA
+                           , PreviousDepth, Depth
+                           , PreviousLine, Line, Bindings),
   edts_rte_int_listener:step(),
 
   %%io:format("mfa info........... after ~p~n", [MFAInfo]),
@@ -417,31 +414,28 @@ mk_editor(Id, FunBody) ->
                   "{\"x\":74,\"y\":92,\"z\":1,\"id\":~p,\"code\":~p}"
                , [Id, FunBody])).
 
-is_tail_recursion(MFAInfo, NewKey, Line) ->
-    case get_hd(MFAInfo) of
-        false ->
-            false;
-        {ok, MFAInfo0} ->
-        io:format("MFAInfo0:~p~nLine~p~nNewKey~p~n",
-                  [MFAInfo0, Line, NewKey]),
-            lists:any(fun(Clause) ->
-                       Line =:= edts_rte_erlang:get_line_from_clause(Clause)
-                     end, MFAInfo0#mfa_info.clauses_lines)
-    end.
-
 %% @doc if the clauses are unfortunately programmed in the same line
 %% then rte shall feel confused and refuse to display any value of
 %% the variables.
-update_mfa_info(MFAInfo, {M, F, A}, D, Line, Bindings) ->
+update_mfa_info( MFAInfo, {M, F, A}, PreviousDepth, Depth
+               , PreviousLine, Line, Bindings) ->
   %% if is tailrecursion OR mfad not the same
   %%    add new mfainfo
   %% else
-  %%    updae mfainfo
+  %%    update mfainfo
   io:format("update mfainfo.......:~p~n", [MFAInfo]),
-  Key = {M, F, A, D},
+  Key = {M, F, A, Depth},
   io:format("key.......:~p~n", [Key]),
-  io:format("app_p.......:~p~n", [add_p(MFAInfo, Key, Line)]),
-  case add_p(MFAInfo, Key, Line) of
+  io:format("app_p.......:~p~n",
+            [add_new_mfa_info_p( MFAInfo, Key
+                               , PreviousDepth, Depth
+                               , PreviousLine, Line)]),
+  io:format("params:~p~n", [[MFAInfo, Key
+                         , PreviousDepth, Depth
+                         , PreviousLine, Line]]),
+  case add_new_mfa_info_p( MFAInfo, Key
+                         , PreviousDepth, Depth
+                         , PreviousLine, Line) of
     true ->
       %% add new mfa_info
       {ok, FunAbsForm} = edts_code:get_function_body(M, F, A),
@@ -449,7 +443,7 @@ update_mfa_info(MFAInfo, {M, F, A}, D, Line, Bindings) ->
                            FunAbsForm),
       AllClausesLn     = edts_rte_erlang:traverse_clause_struct(
                            Line, AllClausesLn0),
-      io:format("====== new mfaform key:~p~n", [{M, F, A, D}]),
+      io:format("====== new mfaform key:~p~n", [{M, F, A, Depth}]),
       Val = #mfa_info{ mfad          = Key
                      , fun_form      = FunAbsForm
                      , clauses_lines = AllClausesLn
@@ -466,17 +460,27 @@ update_mfa_info(MFAInfo, {M, F, A}, D, Line, Bindings) ->
       [Val | tl(MFAInfo)]
   end.
 
-add_p(MFAInfo, NewKey, Line) ->
-  IsKeyEqual = case get_hd(MFAInfo) of
-                 false ->
-                   false;
-                 {ok, MFAInfo0} ->
-                   MFAInfo0#mfa_info.mfad =:= NewKey
-               end,
-  IsTailRecu = is_tail_recursion(MFAInfo, NewKey, Line),
-  io:format("is_tail_recursion is:~p~n", [IsTailRecu]),
-  IsTailRecu or (not IsKeyEqual).
-
+%% @doc Return true when a new mfa info needs to be added. This will happen
+%%      when:
+%%      1) the Key (mfad) isn't the same
+%%      2) tail recursion
+%%      When the previous depth is bigger than the current depth, which means
+%%      that we just jump out of a sub function, we should not be adding
+%%      new mfa_info either.
+add_new_mfa_info_p( _MFAInfo, _NewKey
+                  , PreviousDepth, Depth, _PreviousLine, _NewLine)
+  when PreviousDepth > Depth ->
+  false;
+add_new_mfa_info_p( MFAInfo, NewKey
+                  , _PreviousDepth, _Depth, PreviousLine, NewLine) ->
+  case is_key_of_hd_elem(NewKey, MFAInfo) of
+    false ->
+      true;
+    true  ->
+      edts_rte_erlang:is_tail_recursion( (hd(MFAInfo))#mfa_info.clauses_lines
+                                       , PreviousLine
+                                       , NewLine)
+  end.
 
 is_key_of_hd_elem(Key, MFAInfo) ->
   case get_hd(MFAInfo) of

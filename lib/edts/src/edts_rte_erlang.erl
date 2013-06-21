@@ -28,11 +28,11 @@
 -export([ convert_list_to_term/2
         , expand_records/2
         , extract_fun_clauses_line_num/1
-        , get_line_from_clause/1
-        , traverse_clause_struct/2
-        , read_and_add_records/2
-        , var_to_val_in_fun/3
         , get_module_sorted_fun_info/1
+        , is_tail_recursion/3
+        , read_and_add_records/2
+        , traverse_clause_struct/2
+        , var_to_val_in_fun/3
         ]).
 
 %%%_* Includes =================================================================
@@ -59,9 +59,6 @@ convert_list_to_term(Arguments, _RT) ->
   {value, Value,_Bs} = Val,
   io:format("val:~p~n", [Value]),
   Value.
-
-get_line_from_clause(#clause_struct{line = Line}) ->
-  Line.
 
 expand_records(RT, E0) ->
   UsedRecords = used_record_defs(E0, RT),
@@ -191,6 +188,30 @@ get_module_sorted_fun_info(M) ->
         [[Line, Fun, Arity] | LineFunAritys]
     end, [], FunAritys),
   lists:reverse(lists:sort(AllLineFunAritys)).
+
+%% @doc To be able to see if it is a tail recursion, we need to check
+%%      if the the new line is either in the other clause of the
+%%      same function or it is in the same clause but the new line
+%%      is equal or smaller than the previous line.
+is_tail_recursion(ClauseStructs, PreviousLine, NewLine) ->
+  %% #clause_struct{line = L, sub_clause = ExprsLn, touched = Touched}
+  io:format("is_tail_recursion:~p~n", [[ClauseStructs, PreviousLine, NewLine]]),
+  {LineSmallerClauses, _LineBiggerClauses} =
+    lists:splitwith(fun(#clause_struct{line = L}) ->
+                      L > NewLine
+                    end, ClauseStructs),
+  #clause_struct{touched = Touched, line = L} =
+    hd(lists:reverse(LineSmallerClauses)),
+  case Touched of
+    false -> true;
+    true  ->
+      %% assert
+      true = PreviousLine > L,
+      %% if previous line is bigger or equal than new line, then it
+      %% should be a tail recursion
+      PreviousLine >= NewLine
+  end.
+
 
 %%%_* Internal =================================================================
 read_and_add_records(Module, Selected, Options, Bs, RT) ->
