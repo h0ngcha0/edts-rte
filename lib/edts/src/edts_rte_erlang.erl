@@ -77,7 +77,10 @@ extract_clauses_line_num([{clause,L,_ArgList0,_WhenList0,Exprs0}|T]) ->
 
 extract_exprs_line_num(Exprs) ->
   lists:foldl(fun(Expr, LineNums) ->
-                extract_expr_line_num(Expr) ++ LineNums
+                case extract_expr_line_num(Expr) of
+                  []  -> LineNums;
+                  Lns -> lists:reverse([Lns|LineNums])
+                end
               end, [], Exprs).
 
 extract_expr_line_num(Exprs) when is_list(Exprs)         ->
