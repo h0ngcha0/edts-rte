@@ -195,11 +195,14 @@ get_module_sorted_fun_info(M) ->
 %%      is equal or smaller than the previous line.
 is_tail_recursion(ClauseStructs, PreviousLine, NewLine) ->
   %% #clause_struct{line = L, sub_clause = ExprsLn, touched = Touched}
-  io:format("is_tail_recursion:~p~n", [[ClauseStructs, PreviousLine, NewLine]]),
+  io:format("8) is_tail_recursion:~p~n"
+            , [[ClauseStructs, PreviousLine, NewLine]]),
   {LineSmallerClauses, _LineBiggerClauses} =
     lists:splitwith(fun(#clause_struct{line = L}) ->
-                      L > NewLine
+                      L < NewLine
                     end, ClauseStructs),
+  io:format("9) LineSmaller:~p~nLineBigger:~p~n"
+            , [LineSmallerClauses, _LineBiggerClauses]),
   #clause_struct{touched = Touched, line = L} =
     hd(lists:reverse(LineSmallerClauses)),
   case Touched of

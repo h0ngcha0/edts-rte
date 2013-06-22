@@ -57,6 +57,7 @@
 -record(mfa_info, { mfad          :: {m(), f(), a(), non_neg_integer()}
                   , fun_form      :: term()  %% FIXME type
                   , clauses_lines :: term()  %% FIXME type
+                  , line          :: non_neg_integer()
                   , bindings      :: binding()
                   }).
 
@@ -185,7 +186,7 @@ handle_call({rte_run, Module, Fun, Args0}, _From, State) ->
 -spec handle_info(term(), state()) -> {noreply, state()} |
                                       {noreply, state(), Timeout::timeout()} |
                                       {stop, Reason::atom(), state()}.
-handle_info(Msg, State) ->
+handle_info(_Msg, State) ->
   %% io:format("rte_server handle_info ...., Msg:~p~n", [Msg]),
   {noreply, State}.
 
@@ -205,14 +206,14 @@ handle_cast({finished_attach, Pid}, State) ->
   {noreply, State};
 handle_cast({send_binding, {break_at, Bindings, Module, Line, Depth}},State0) ->
   {MFA, State} = get_mfa(State0, Module, Line),
-  io:format( "~nsend_binding......before step. old depth:~p , new_depth:~p~n"
+  io:format("1) send_binding......before step. old depth:~p , new_depth:~p~n"
            , [State#dbg_state.depth, Depth]),
-  io:format("send_binding......Line:~p, Bindings:~p~n",[Line, Bindings]),
+  io:format("2) send_binding......Line:~p, Bindings:~p~n",[Line, Bindings]),
 
   %%io:format("mfa info........... before ~p~n", [State#dbg_state.mfa_info]),
 
-  io:format("old mfa:~p~n", [State#dbg_state.mfa]),
-  io:format("new mfa:~p~n", [MFA]),
+  io:format("3) old mfa:~p~n", [State#dbg_state.mfa]),
+  io:format("4) new mfa:~p~n", [MFA]),
 
   %% get mfa and add one level if it is not main function
   %% output sub function body when the process leaves it.
@@ -229,6 +230,8 @@ handle_cast({send_binding, {break_at, Bindings, Module, Line, Depth}},State0) ->
                               {_M, _F, _A, D} = MFAInfoS#mfa_info.mfad,
                               D > Depth
                           end, State#dbg_state.mfa_info),
+        io:format("4) OutputMFAInfo:~p~n", [OutputMFAInfo]),
+        io:format("5) RestMFAInfo:~p~n", [RestMFAInfo]),
         %% output function bodies
         OutputFuns = output_subfuns(OutputMFAInfo) ++ State#dbg_state.subfuns,
         {OutputFuns, RestMFAInfo};
@@ -236,24 +239,18 @@ handle_cast({send_binding, {break_at, Bindings, Module, Line, Depth}},State0) ->
         {State#dbg_state.subfuns, State#dbg_state.mfa_info}
     end,
 
-  PreviousLine  = State#dbg_state.line,
-  PreviousDepth = State#dbg_state.depth,
-  MFAInfo = update_mfa_info( MFAInfo1, MFA
-                           , PreviousDepth, Depth
-                           , PreviousLine, Line, Bindings),
+  MFAInfo = update_mfa_info( MFAInfo1, MFA, Depth, Line, Bindings),
   edts_rte_int_listener:step(),
-
-  %%io:format("mfa info........... after ~p~n", [MFAInfo]),
 
   %% save current bindings for further use
   {noreply, State#dbg_state{ bindings = Bindings, mfa = MFA
                            , depth = Depth, line = Line
                            , mfa_info = MFAInfo
                            , subfuns = SubFuns}};
-handle_cast(exit, #dbg_state{bindings = Bindings, line = Line} = State) ->
+handle_cast(exit, #dbg_state{bindings = _Bindings, line = _Line} = State) ->
   %% io:format( "in exit...:~n mfa:~p~nbinding:~p~n"
   %%          , [State#dbg_state.mfa, Bindings]),
-  {M, F, A} = MFA = State#dbg_state.mfa,
+  {M, F, A} = State#dbg_state.mfa,
 
   AllFuns = output_subfuns(State#dbg_state.mfa_info) ++ State#dbg_state.subfuns,
   AllFunsStr = concat_sub_funs(AllFuns),
@@ -274,7 +271,7 @@ output_subfuns(MFAInfos) ->
     fun(MFAInfo0, Funs) ->
            {M, F, A, D} = MFAInfo0#mfa_info.mfad,
            MFA = {M, F, A},
-           ReplacedFun = replace_var_in_fun_body1(MFA
+           ReplacedFun = replace_var_in_fun_body(MFA
                                                 , D
                                                 , MFAInfo0),
            %%io:format("what replacedfunc:~p~n", [ReplacedFun]),
@@ -339,7 +336,7 @@ find_function(L, [[L0, _F, _A] = LFA | T]) ->
     false -> find_function(L, T)
   end.
 
-replace_var_in_fun_body1(MFA, Depth, MFAInfoS) ->
+replace_var_in_fun_body(MFA, Depth, MFAInfoS) ->
   #mfa_info{ mfad          = Key
            , bindings      = Bindings
            , fun_form      = FunAbsForm
@@ -347,24 +344,6 @@ replace_var_in_fun_body1(MFA, Depth, MFAInfoS) ->
   %% assert
   Key = erlang:append_element(MFA, Depth),
   edts_rte_erlang:var_to_val_in_fun(FunAbsForm, AllClausesLn, Bindings).
-
-replace_var_in_fun_body(MFA, Depth, MFAInfo) ->
-  %%io:format( "replace.......MFA is:~p~nDepth is: ~p~nMFAInfo is:~p~n"
-  %%         , [MFA, Depth, MFAInfo]),
-  #mfa_info{ mfad          = Key
-           , bindings      = Bindings
-           , fun_form      = FunAbsForm
-           , clauses_lines = AllClausesLn} = hd(MFAInfo),
-  %% assert
-  Key = erlang:append_element(MFA, Depth),
-  edts_rte_erlang:var_to_val_in_fun(FunAbsForm, AllClausesLn, Bindings).
-
-cleanup_mfa_info(MFA, D, MFAInfo) ->
-  io:format("clean...........~n"),
-  Key = erlang:append_element(MFA, D),
-  case is_key_of_hd_elem(Key, MFAInfo) of
-    true -> tl(MFAInfo)
-  end.
 
 concat_sub_funs(SubFuns) ->
   lists:foldl(
@@ -417,25 +396,17 @@ mk_editor(Id, FunBody) ->
 %% @doc if the clauses are unfortunately programmed in the same line
 %% then rte shall feel confused and refuse to display any value of
 %% the variables.
-update_mfa_info( MFAInfo, {M, F, A}, PreviousDepth, Depth
-               , PreviousLine, Line, Bindings) ->
+update_mfa_info( MFAInfo, {M, F, A}, Depth, Line, Bindings) ->
   %% if is tailrecursion OR mfad not the same
   %%    add new mfainfo
   %% else
   %%    update mfainfo
-  io:format("update mfainfo.......:~p~n", [MFAInfo]),
   Key = {M, F, A, Depth},
-  io:format("key.......:~p~n", [Key]),
-  io:format("app_p.......:~p~n",
-            [add_new_mfa_info_p( MFAInfo, Key
-                               , PreviousDepth, Depth
-                               , PreviousLine, Line)]),
-  io:format("params:~p~n", [[MFAInfo, Key
-                         , PreviousDepth, Depth
-                         , PreviousLine, Line]]),
-  case add_new_mfa_info_p( MFAInfo, Key
-                         , PreviousDepth, Depth
-                         , PreviousLine, Line) of
+  io:format("6) params:~p~n", [[MFAInfo, Key, Depth, Line]]),
+  AddNewMFAInfoP = add_new_mfa_info_p(MFAInfo, Key, Depth, Line),
+
+  io:format("7) app_p.......:~p~n", [AddNewMFAInfoP]),
+  case AddNewMFAInfoP of
     true ->
       %% add new mfa_info
       {ok, FunAbsForm} = edts_code:get_function_body(M, F, A),
@@ -443,8 +414,8 @@ update_mfa_info( MFAInfo, {M, F, A}, PreviousDepth, Depth
                            FunAbsForm),
       AllClausesLn     = edts_rte_erlang:traverse_clause_struct(
                            Line, AllClausesLn0),
-      io:format("====== new mfaform key:~p~n", [{M, F, A, Depth}]),
       Val = #mfa_info{ mfad          = Key
+                     , line          = Line
                      , fun_form      = FunAbsForm
                      , clauses_lines = AllClausesLn
                      , bindings      = Bindings},
@@ -455,6 +426,7 @@ update_mfa_info( MFAInfo, {M, F, A}, PreviousDepth, Depth
                , clauses_lines = AllClausesLn} = Val0,
       TraversedLns = edts_rte_erlang:traverse_clause_struct(Line, AllClausesLn),
       Val = Val0#mfa_info{ clauses_lines = TraversedLns
+                         , line          = Line
                          , bindings      = Bindings
                          },
       [Val | tl(MFAInfo)]
@@ -466,19 +438,25 @@ update_mfa_info( MFAInfo, {M, F, A}, PreviousDepth, Depth
 %%      2) tail recursion
 %%      When the previous depth is bigger than the current depth, which means
 %%      that we just jump out of a sub function, we should not be adding
-%%      new mfa_info either.
-add_new_mfa_info_p( _MFAInfo, _NewKey
-                  , PreviousDepth, Depth, _PreviousLine, _NewLine)
-  when PreviousDepth > Depth ->
-  false;
-add_new_mfa_info_p( MFAInfo, NewKey
-                  , _PreviousDepth, _Depth, PreviousLine, NewLine) ->
+%%      new mfa_info either. <- this is the wrong assumption..... and the
+%%      following snippet explains why:
+%%      fib(0) ->
+%%         0;
+%%      fib(1) ->
+%%         1;
+%%      fib(N) ->
+%%         fib(N-1) + fib(N-2).
+%%      assuming that we want to calculate fib(3), when fib(2) is returned
+%%      depth goes from 4 to 3 but the int goes directly to the fib(1) clause,
+%%      whose mfa_info we should definitely add.
+add_new_mfa_info_p(MFAInfo, NewKey, _Depth, NewLine) ->
   case is_key_of_hd_elem(NewKey, MFAInfo) of
     false ->
       true;
     true  ->
-      edts_rte_erlang:is_tail_recursion( (hd(MFAInfo))#mfa_info.clauses_lines
-                                       , PreviousLine
+      MFAInfoElem = hd(MFAInfo),
+      edts_rte_erlang:is_tail_recursion( MFAInfoElem#mfa_info.clauses_lines
+                                       , MFAInfoElem#mfa_info.line
                                        , NewLine)
   end.
 
