@@ -28,10 +28,11 @@
 -export([ convert_list_to_term/2
         , expand_records/2
         , extract_fun_clauses_line_num/1
-        , traverse_clause_struct/2
-        , read_and_add_records/2
-        , var_to_val_in_fun/3
         , get_module_sorted_fun_info/1
+        , is_tail_recursion/3
+        , read_and_add_records/2
+        , traverse_clause_struct/2
+        , var_to_val_in_fun/3
         ]).
 
 %%%_* Includes =================================================================
@@ -44,19 +45,19 @@
 
 %%%_* API ======================================================================
 convert_list_to_term(Arguments, _RT) ->
-  io:format("args:~p~n", [Arguments]),
+  edts_rte:debug("args:~p~n", [Arguments]),
   %% N.B. this is very hackish. added a '.' because
   %%      erl_scan:string/1 requires full expression with dot
   {ok, Tokens,__Endline} = erl_scan:string(Arguments++"."),
-  io:format("tokens:~p~n", [Tokens]),
+  edts_rte:debug("tokens:~p~n", [Tokens]),
   {ok, AbsForm0}         = erl_parse:parse_exprs(Tokens),
   AbsForm                = replace_var_with_val_in_expr(AbsForm0, [], []),
-  io:format("absf:~p~n", [AbsForm0]),
+  edts_rte:debug("absf:~p~n", [AbsForm0]),
   Val     = erl_eval:exprs( AbsForm
                           , erl_eval:new_bindings()),
-  io:format("Valg:~p~n", [Val]),
+  edts_rte:debug("Valg:~p~n", [Val]),
   {value, Value,_Bs} = Val,
-  io:format("val:~p~n", [Value]),
+  edts_rte:debug("val:~p~n", [Value]),
   Value.
 
 expand_records(RT, E0) ->
@@ -76,7 +77,10 @@ extract_clauses_line_num([{clause,L,_ArgList0,_WhenList0,Exprs0}|T]) ->
 
 extract_exprs_line_num(Exprs) ->
   lists:foldl(fun(Expr, LineNums) ->
-                extract_expr_line_num(Expr) ++ LineNums
+                case extract_expr_line_num(Expr) of
+                  []  -> LineNums;
+                  Lns -> lists:reverse([Lns|LineNums])
+                end
               end, [], Exprs).
 
 extract_expr_line_num(Exprs) when is_list(Exprs)         ->
@@ -187,6 +191,33 @@ get_module_sorted_fun_info(M) ->
         [[Line, Fun, Arity] | LineFunAritys]
     end, [], FunAritys),
   lists:reverse(lists:sort(AllLineFunAritys)).
+
+%% @doc To be able to see if it is a tail recursion, we need to check
+%%      if the the new line is either in the other clause of the
+%%      same function or it is in the same clause but the new line
+%%      is equal or smaller than the previous line.
+is_tail_recursion(ClauseStructs, PreviousLine, NewLine) ->
+  %% #clause_struct{line = L, sub_clause = ExprsLn, touched = Touched}
+  edts_rte:debug("8) is_tail_recursion:~p~n"
+            , [[ClauseStructs, PreviousLine, NewLine]]),
+  {LineSmallerClauses, _LineBiggerClauses} =
+    lists:splitwith(fun(#clause_struct{line = L}) ->
+                      L < NewLine
+                    end, ClauseStructs),
+  edts_rte:debug("9) LineSmaller:~p~nLineBigger:~p~n"
+            , [LineSmallerClauses, _LineBiggerClauses]),
+  #clause_struct{touched = Touched, line = L} =
+    hd(lists:reverse(LineSmallerClauses)),
+  case Touched of
+    false -> true;
+    true  ->
+      %% assert
+      true = PreviousLine > L,
+      %% if previous line is bigger or equal than new line, then it
+      %% should be a tail recursion
+      PreviousLine >= NewLine
+  end.
+
 
 %%%_* Internal =================================================================
 read_and_add_records(Module, Selected, Options, Bs, RT) ->
@@ -448,7 +479,7 @@ var_to_val_in_fun(AbsForm, AllClausesLn, Bindings) ->
   NewFunBody            = do_var_to_val_in_fun( AbsForm
                                               , AllClausesLn
                                               , Bindings),
-  %% io:format("New Body before flatten: ~p~n", [NewFunBody]),
+  %% edts_rte:debug("New Body before flatten: ~p~n", [NewFunBody]),
   NewForm               = erl_pp:form(NewFunBody),
   lists:flatten(NewForm).
 
@@ -458,7 +489,7 @@ do_var_to_val_in_fun( {function, L, FuncName, Arity, Clauses0}
   Clauses = replace_var_with_val_in_clauses( Clauses0
                                            , AllClausesLn
                                            , Bindings),
-  %% io:format("Replaced Clauses are:~p~n", [Clauses0]),
+  %% edts_rte:debug("Replaced Clauses are:~p~n", [Clauses0]),
   {function, L, FuncName, Arity, Clauses}.
 
 %% @doc replace variable names with values in each of the clauses
@@ -615,7 +646,7 @@ maybe_replace_pid(Tokens0, Value) ->
   case is_pid_tokens(Tokens0) of
     true  ->
       ValStr0 = lists:flatten(io_lib:format("{__pid__, ~p}", [Value])),
-      io:format("pid token:~p~n", [Tokens0]),
+      edts_rte:debug("pid token:~p~n", [Tokens0]),
       ValStr1 = re:replace(ValStr0, "\\.", ",", [{return, list}, global]),
       ValStr2 = re:replace(ValStr1, "\\<", "{", [{return, list}, global]),
       ValStr  = re:replace(ValStr2, "\\>", "}", [{return, list}, global]),
