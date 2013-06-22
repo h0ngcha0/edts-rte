@@ -156,18 +156,18 @@ handle_call({rte_run, Module, Fun, Args0}, _From, State) ->
   %% try to read the record from the current module.. right now this is the
   %% only record support
   AddedRds = edts_rte_erlang:read_and_add_records(Module, RcdTbl),
-  io:format("AddedRds:~p~n", [AddedRds]),
+  edts_rte:debug("AddedRds:~p~n", [AddedRds]),
   Args     = binary_to_list(Args0),
   ArgsTerm = edts_rte_erlang:convert_list_to_term(Args, RcdTbl),
-  io:format("ArgsTerm:~p~n", [ArgsTerm]),
+  edts_rte:debug("ArgsTerm:~p~n", [ArgsTerm]),
   [Module] = edts_rte_int_listener:interpret_modules([Module]),
   Arity    = length(ArgsTerm),
-  io:format("Arity:~p~n", [Arity]),
+  edts_rte:debug("Arity:~p~n", [Arity]),
   {ok, set, {Module, Fun, Arity}} =
     edts_rte_int_listener:set_breakpoint(Module, Fun, Arity),
-  io:format("rte_run: after setbreakpoint~n"),
+  edts_rte:debug("rte_run: after setbreakpoint~n"),
   Pid      = erlang:spawn(Module, Fun, ArgsTerm),
-  io:format("called function pid:~p~n", [Pid]),
+  edts_rte:debug("called function pid:~p~n", [Pid]),
   {reply, {okn, finished}, State#dbg_state{ proc         = Pid
                                           , bindings     = []
                                           , mfa          = {Module, Fun, Arity}
@@ -187,7 +187,7 @@ handle_call({rte_run, Module, Fun, Args0}, _From, State) ->
                                       {noreply, state(), Timeout::timeout()} |
                                       {stop, Reason::atom(), state()}.
 handle_info(_Msg, State) ->
-  %% io:format("rte_server handle_info ...., Msg:~p~n", [Msg]),
+  %% edts_rte:debug("rte_server handle_info ...., Msg:~p~n", [Msg]),
   {noreply, State}.
 
 %%------------------------------------------------------------------------------
@@ -202,18 +202,16 @@ handle_info(_Msg, State) ->
 handle_cast({finished_attach, Pid}, State) ->
   Pid = State#dbg_state.proc,
   edts_rte_int_listener:step(),
-  io:format("finish attach.....~n"),
+  edts_rte:debug("finish attach.....~n"),
   {noreply, State};
 handle_cast({send_binding, {break_at, Bindings, Module, Line, Depth}},State0) ->
   {MFA, State} = get_mfa(State0, Module, Line),
-  io:format("1) send_binding......before step. old depth:~p , new_depth:~p~n"
+  edts_rte:debug("1) send_binding.. before step. old depth:~p , new_depth:~p~n"
            , [State#dbg_state.depth, Depth]),
-  io:format("2) send_binding......Line:~p, Bindings:~p~n",[Line, Bindings]),
+  edts_rte:debug("2) send_binding.. Line:~p, Bindings:~p~n",[Line, Bindings]),
 
-  %%io:format("mfa info........... before ~p~n", [State#dbg_state.mfa_info]),
-
-  io:format("3) old mfa:~p~n", [State#dbg_state.mfa]),
-  io:format("4) new mfa:~p~n", [MFA]),
+  edts_rte:debug("3) old mfa:~p~n", [State#dbg_state.mfa]),
+  edts_rte:debug("4) new mfa:~p~n", [MFA]),
 
   %% get mfa and add one level if it is not main function
   %% output sub function body when the process leaves it.
@@ -221,8 +219,8 @@ handle_cast({send_binding, {break_at, Bindings, Module, Line, Depth}},State0) ->
   {SubFuns, MFAInfo1} =
     case State#dbg_state.depth > Depth of
       true  ->
-        io:format( "in send_replacedfun...:~n mfa:~p~nbinding:~p~nDepth:~p~n"
-                   , [State#dbg_state.mfa, State#dbg_state.bindings, Depth]),
+        edts_rte:debug( "send replaced fun..~n mfa:~p~nbinding:~p~nDepth:~p~n"
+                      , [State#dbg_state.mfa, State#dbg_state.bindings, Depth]),
 
         %% Pop function up till function's depth <= Depth
         {OutputMFAInfo, RestMFAInfo} =
@@ -230,8 +228,8 @@ handle_cast({send_binding, {break_at, Bindings, Module, Line, Depth}},State0) ->
                               {_M, _F, _A, D} = MFAInfoS#mfa_info.mfad,
                               D > Depth
                           end, State#dbg_state.mfa_info),
-        io:format("4) OutputMFAInfo:~p~n", [OutputMFAInfo]),
-        io:format("5) RestMFAInfo:~p~n", [RestMFAInfo]),
+        edts_rte:debug("4) OutputMFAInfo:~p~n", [OutputMFAInfo]),
+        edts_rte:debug("5) RestMFAInfo:~p~n", [RestMFAInfo]),
         %% output function bodies
         OutputFuns = output_subfuns(OutputMFAInfo) ++ State#dbg_state.subfuns,
         {OutputFuns, RestMFAInfo};
@@ -248,20 +246,11 @@ handle_cast({send_binding, {break_at, Bindings, Module, Line, Depth}},State0) ->
                            , mfa_info = MFAInfo
                            , subfuns = SubFuns}};
 handle_cast(exit, #dbg_state{bindings = _Bindings, line = _Line} = State) ->
-  %% io:format( "in exit...:~n mfa:~p~nbinding:~p~n"
-  %%          , [State#dbg_state.mfa, Bindings]),
-  {M, F, A} = State#dbg_state.mfa,
-
-  AllFuns = output_subfuns(State#dbg_state.mfa_info) ++ State#dbg_state.subfuns,
+  AllFuns    = output_subfuns(State#dbg_state.mfa_info) ++
+               State#dbg_state.subfuns,
   AllFunsStr = concat_sub_funs(AllFuns),
-
-  %% Fs = make_comments(M, F, A) ++
-  %%      ReplacedFun            ++ "\n" ++
-  %%      SubFuns,
-  io:format("all functions:~p~n", [AllFunsStr]),
-  %% io:format( "...............all mfa info keys:~p~n"
-  %%          , [dict:fetch_keys(MFAInfo)]),
-  send_fun(M, F, A, AllFunsStr),
+  edts_rte:debug("all functions:~p~n", [AllFunsStr]),
+  send_fun(State#dbg_state.mfa, AllFunsStr),
   {noreply, State};
 handle_cast(_Msg, State) ->
   {noreply, State}.
@@ -271,13 +260,9 @@ output_subfuns(MFAInfos) ->
     fun(MFAInfo0, Funs) ->
            {M, F, A, D} = MFAInfo0#mfa_info.mfad,
            MFA = {M, F, A},
-           ReplacedFun = replace_var_in_fun_body(MFA
-                                                , D
-                                                , MFAInfo0),
-           %%io:format("what replacedfunc:~p~n", [ReplacedFun]),
+           ReplacedFun = replace_var_in_fun_body(MFA, D, MFAInfo0),
            [{M, F, A, ReplacedFun} | Funs]
           end, [], MFAInfos).
-
 
 %%------------------------------------------------------------------------------
 %% @private
@@ -357,19 +342,19 @@ make_comments(M, F, A) ->
   lists:flatten(io_lib:format("%% ========== Generated by RTE ==========~n"
                               "%% ========== MFA: {~p, ~p, ~p}:~n", [M, F, A])).
 
-send_fun(M, F, Arity, FunBody) ->
-  io:format("final function body is:~p~n", [FunBody]),
+send_fun({M, F, A}, FunBody) ->
+  edts_rte:debug("final function body is:~p~n", [FunBody]),
   lists:foreach(fun(Fun) ->
-                    Fun(M, F, Arity, FunBody)
+                    Fun(M, F, A, FunBody)
                 end, [ fun send_fun_to_edts_web/4
                      , fun send_fun_to_emacs/4
                      ]).
 
 send_fun_to_emacs(M, F, Arity, FunBody) ->
   Id = lists:flatten(io_lib:format("*~p__~p__~p*", [M, F, Arity])),
-  io:format("~n~nFunBody:~p~n", [FunBody]),
+  edts_rte:debug("FunBody:~p~n", [FunBody]),
   Cmd = make_emacsclient_cmd(Id, FunBody),
-  io:format("~n~ncmd:~p~n~n~n", [Cmd]),
+  edts_rte:debug("cmd:~p~n~n~n", [Cmd]),
   os:cmd(Cmd).
 
 make_emacsclient_cmd(Id, FunBody) ->
@@ -402,10 +387,10 @@ update_mfa_info( MFAInfo, {M, F, A}, Depth, Line, Bindings) ->
   %% else
   %%    update mfainfo
   Key = {M, F, A, Depth},
-  io:format("6) params:~p~n", [[MFAInfo, Key, Depth, Line]]),
+  edts_rte:debug("6) params:~p~n", [[MFAInfo, Key, Depth, Line]]),
   AddNewMFAInfoP = add_new_mfa_info_p(MFAInfo, Key, Depth, Line),
 
-  io:format("7) app_p.......:~p~n", [AddNewMFAInfoP]),
+  edts_rte:debug("7) app_p.......:~p~n", [AddNewMFAInfoP]),
   case AddNewMFAInfoP of
     true ->
       %% add new mfa_info
