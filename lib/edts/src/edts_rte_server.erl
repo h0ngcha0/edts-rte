@@ -67,6 +67,7 @@
                    , replaced_funs = []         :: list()  %% FIXME type
                    , result        = undefined  :: term()
                    , module_cache  = []         :: list()  %% FIXME type
+                   , exit_p        = false      :: boolean()
                    }).
 
 %%%_* Types ====================================================================
@@ -176,7 +177,7 @@ handle_call({rte_run, Module, Fun, Args0}, _From, State) ->
                Result = try
                           erlang:apply(Module, Fun, ArgsTerm)
                         catch
-                          T:E -> io_lib:format("~p:~p", [T, E])
+                          T:E -> lists:flatten(io_lib:format("~p:~p", [T, E]))
                         end,
                edts_rte:debug("RTE Result:~p~n", [Result]),
                send_rte_result(make_result({Module, Fun, Arity, Result}))
@@ -189,6 +190,7 @@ handle_call({rte_run, Module, Fun, Args0}, _From, State) ->
                                          , proc          = Pid
                                          , replaced_funs = []
                                          , result        = undefined
+                                         , exit_p        = false
                                          }}.
 
 %%------------------------------------------------------------------------------
@@ -257,18 +259,19 @@ handle_cast({break_at, {Bindings, Module, Line, Depth}},State0) ->
   {noreply, State#rte_state{ depth = Depth
                            , mfa_info_list = MFAInfo
                            , replaced_funs = ReplacedFuns}};
-handle_cast(exit, #rte_state{result = RteResult} = State) ->
+handle_cast(exit, #rte_state{result = RteResult} = State0) ->
   edts_rte:debug("rte server got exit~n"),
-  AllReplacedFuns = generate_replaced_funs(State#rte_state.mfa_info_list) ++
-                    State#rte_state.replaced_funs,
-  send_result_to_clients(RteResult, concat_replaced_funs(AllReplacedFuns)),
-  {noreply, State};
-handle_cast({rte_result, Result}, State) ->
+  State = on_exit(RteResult, State0),
+  {noreply, State#rte_state{exit_p=true}};
+handle_cast({rte_result, Result}, #rte_state{exit_p = ExitP} = State) ->
   edts_rte:debug("rte server got RTE Result:~p~n", [Result]),
-  {noreply, State#rte_state{result = Result}};
+  ExitP andalso on_exit(Result, State),
+  {noreply, State#rte_state{result=Result}};
 handle_cast(_Msg, State) ->
   {noreply, State}.
 
+%% @doc Generate the replaced functions based on the mfa_info list
+-spec generate_replaced_funs([mfa_info()]) -> string().
 generate_replaced_funs(MFAInfoList) ->
   lists:foldl(
     fun(MFAInfo, Funs) ->
@@ -277,6 +280,17 @@ generate_replaced_funs(MFAInfoList) ->
            ReplacedFun = replace_var_in_fun_body(MFA, D, MFAInfo),
            [{M, F, A, ReplacedFun} | Funs]
           end, [], MFAInfoList).
+
+%% @doc Called when an RTE run is finished. Generate the replaced
+%%      functions and send them to the clients.
+-spec on_exit(undefined | string(), state()) -> state().
+on_exit(undefined, State) ->
+  State;
+on_exit(RteResult, State) ->
+  AllReplacedFuns = generate_replaced_funs(State#rte_state.mfa_info_list) ++
+                    State#rte_state.replaced_funs,
+  send_result_to_clients(RteResult, concat_replaced_funs(AllReplacedFuns)),
+  State.
 
 %%------------------------------------------------------------------------------
 %% @private
@@ -448,7 +462,8 @@ record_table_name() ->
 send_result_to_clients(RteResult, FunBody) ->
   edts_rte:debug("final rte result:~p~n", [RteResult]),
   edts_rte:debug("final function body is:~p~n", [FunBody]),
-  lists:foreach( fun(Fun) -> Fun(RteResult ++ FunBody) end
+  Result = string_escape_chars(RteResult ++ FunBody, escaped_chars()),
+  lists:foreach( fun(Fun) -> Fun(Result) end
                , [ fun send_result_to_rte_web/1
                  , fun send_result_to_emacs/1
                  ]).
@@ -497,6 +512,17 @@ mk_editor(Id, FunBody) ->
  lists:flatten( io_lib:format(
                   "{\"x\":74,\"y\":92,\"z\":1,\"id\":\"~s\",\"code\":\"~s\"}"
               , [Id, FunBody])).
+
+%% @doc Escape the chars in a given list from a string.
+-spec string_escape_chars(string(), [string()]) -> string().
+string_escape_chars(Msg, Chars) ->
+  Fun = fun(C, MsgAcc) ->
+          re:replace(MsgAcc, "\\"++C, "\\\\"++C, [global, {return, list}])
+        end,
+  lists:foldl(Fun, Msg, Chars).
+
+escaped_chars() ->
+  ["\"", "<", ">", "[", "]", "{", "}"].
 
 %%%_* Unit tests ===============================================================
 

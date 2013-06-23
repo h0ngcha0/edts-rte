@@ -86,7 +86,7 @@ extract_exprs_line_num(Exprs) ->
 extract_expr_line_num(Exprs) when is_list(Exprs)         ->
   ples(Exprs);
 extract_expr_line_num({cons, _L, Expr, Rest})            ->
-  ples(Rest) ++ ple(Expr);
+  ple(Rest) ++ ple(Expr);
 extract_expr_line_num({tuple, _L, Exprs})                ->
   ples(Exprs);
 extract_expr_line_num({match,_L,LExpr,RExpr})            ->
@@ -112,7 +112,7 @@ extract_expr_line_num(_)                                 ->
 
 %% Result is in the reserse order of Exprs
 ples(Exprs) ->
-  lists:foldl(fun(Expr, NewExprs) -> ple(Expr) ++ NewExprs end, Exprs).
+  lists:foldl(fun(Expr, NewExprs) -> ple(Expr) ++ NewExprs end, [], Exprs).
 
 ple(Expr) ->
   pl(Expr, fun extract_expr_line_num/1).
