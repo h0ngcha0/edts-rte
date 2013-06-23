@@ -186,7 +186,7 @@ step() ->
 step_out() ->
   gen_server:call(?SERVER, step_out, infinity).
 
-%%------------------------------------------------------------------------------
+%------------------------------------------------------------------------------
 %% @doc
 %% Stop debugging
 %% @end
@@ -334,7 +334,7 @@ handle_info({Meta, {break_at, Module, Line, Depth}}, State) ->
   Bindings = int:meta(Meta, bindings, nostack),
   File = int:file(Module),
   notify({break, File, {Module, Line}, Depth, Bindings}),
-  edts_rte_server:send_binding({break_at, Bindings, Module, Line, Depth}),
+  edts_rte_server:break_at({Bindings, Module, Line, Depth}),
   {noreply, State};
 
 %% Became idle (not executing any code under debugging)
