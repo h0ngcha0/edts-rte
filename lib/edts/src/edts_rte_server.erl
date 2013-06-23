@@ -425,10 +425,11 @@ send_function_to_clients(FunBody) ->
 
 %% @doc Send the function body back to Emacs.
 send_fun_to_emacs(FunBody) ->
-  Cmd = make_emacsclient_cmd(make_id(), FunBody),
+  BufferName = io_lib:format("*~s*", [make_id()]),
+  EclientCmd = make_emacsclient_cmd(BufferName, FunBody),
   edts_rte:debug("FunBody:~p~n", [FunBody]),
-  edts_rte:debug("emacsclient CMD:~p~n", [Cmd]),
-  os:cmd(Cmd).
+  edts_rte:debug("emacsclient CMD:~p~n", [EclientCmd]),
+  os:cmd(EclientCmd).
 
 %% @doc Construct the emacsclient command to send the function
 %%      body back to Emacs.
@@ -445,7 +446,13 @@ send_fun_to_rte_web(FunBody) ->
 %% @doc Make the client id.
 -spec make_id() -> string().
 make_id() ->
-  lists:flatten(io_lib:format("*~p_rte_result*", [bla])).
+  lists:flatten(io_lib:format("rte_result_~s", [node_str()])).
+
+%% @doc Return the string representation of the node, replacing
+%%      @ with __at__
+-spec node_str() -> string().
+node_str() ->
+  re:replace(atom_to_list(node()), "@", "__at__", [{return, list}]).
 
 url() ->
   "http://localhost:4587/rte/editors/".
