@@ -471,7 +471,7 @@ prep_rec(E) -> E.
 %% @doc replace the temporary variables with the actual value in a function
 -spec var_to_val_in_fun( FunBody       :: string()
                        , AllClausesLn  :: #clause_struct{}
-                       , Bindings      :: edts_rte_server:binding())
+                       , Bindings      :: edts_rte_server:bindings())
                        -> string().
 var_to_val_in_fun(AbsForm, AllClausesLn, Bindings) ->
   %% Replace variable names with variables' value and
