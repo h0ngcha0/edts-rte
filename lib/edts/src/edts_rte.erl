@@ -78,7 +78,7 @@ code_change(_OldVsn, State, _Extra) ->
 debug(Str) -> debug(Str, []).
 
 -ifdef(DEBUG).
-debug(FmtStr, Args) -> error_logger:info_msg(FmtStr, Args).
+debug(FmtStr, Args) -> io:format(FmtStr, Args).
 -else.
 debug(_FmtStr, _Args) -> ok.
 -endif.
