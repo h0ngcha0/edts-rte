@@ -17,11 +17,10 @@
 %%% @end
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-%% This server talks to the "rte interpreter server" to retrieve the binding
-%% information. It keeps track of all the neccessary information for displaying
-%% the function bodies with temp variables replaced.
-%% It also keeps track of the record definition using an ets table, much like
-%% what the shell does.
+%% This server talks to the "rte int listener" to retrieve the binding info.
+%% It keeps track of all the neccessary information for displaying the
+%% function bodies with temp variables replaced. It also keeps track of the
+%% record definition using an ets table, much like what the shell does.
 
 %%%_* Module declaration =======================================================
 -module(edts_rte_server).
@@ -35,12 +34,12 @@
 
 -export([started_p/0]).
 
-%% Debugger API
--export([ rte_run/3
+%% APIs for the int listener
+-export([ break_at/1
         , finished_attach/1
-        , send_binding/1
-        , send_exit/0
         , read_and_add_records/1
+        , rte_run/3
+        , send_exit/0
         ]).
 
 %% gen_server callbacks
@@ -62,10 +61,6 @@
 
 -record(rte_state, { proc          = unattached :: unattached
                                                  | pid()
-                   , mfa           = undefined  :: undefined
-                                                 | { module()
-                                                   , function()
-                                                   , arity()}
                    , record_table  = undefined  :: atom()
                    , depth         = 0          :: depth()
                    , mfa_info_list = []         :: [mfa_info()]
@@ -106,19 +101,31 @@ start_link() ->
 
 %%------------------------------------------------------------------------------
 %% @doc
-%% Run function
-%% @end
--spec rte_run(Module::module(), Fun::function(), Args::list()) -> any().
+%% Run function through the RTE mechanism.
+-spec rte_run(Module::module(), Fun::function(), Args::list()) -> {ok,finished}.
 %%------------------------------------------------------------------------------
 rte_run(Module, Fun, Args) ->
   gen_server:call(?SERVER, {rte_run, Module, Fun, Args}).
 
+%%------------------------------------------------------------------------------
+%% @doc Used by int listener to tell edts_rte_server that it has attached
+%%      to the process that executes the rte function.
+-spec finished_attach(pid()) -> ok.
 finished_attach(Pid) ->
   gen_server:cast(?SERVER, {finished_attach, Pid}).
 
-send_binding(Msg) ->
-  gen_server:cast(?SERVER, {send_binding, Msg}).
+%%------------------------------------------------------------------------------
+%% @doc Used by int listener to tell edts_rte_server that it has hit a break
+%%      point with the bindings, module, line number and call stack depth
+%%      information.
+-spec break_at({bindings(), module(), line(), depth()}) -> ok.
+break_at(Msg) ->
+  gen_server:cast(?SERVER, {break_at, Msg}).
 
+%%------------------------------------------------------------------------------
+%% @doc Used by int listener to tell edts_rte_server that it has finished
+%%      executing the function.
+-spec send_exit() -> ok.
 send_exit() ->
   gen_server:cast(?SERVER, exit).
 
@@ -167,7 +174,6 @@ handle_call({rte_run, Module, Fun, Args0}, _From, State) ->
   Pid      = erlang:spawn(Module, Fun, ArgsTerm),
   edts_rte:debug("called function pid:~p~n", [Pid]),
   {reply, {ok, finished}, State#rte_state{ proc          = Pid
-                                         , mfa           = {Module, Fun, Arity}
                                          , depth         = 0
                                          , mfa_info_list = []
                                          , replaced_funs = []
@@ -200,13 +206,12 @@ handle_cast({finished_attach, Pid}, State) ->
   edts_rte_int_listener:step(),
   edts_rte:debug("finish attach.....~n"),
   {noreply, State};
-handle_cast({send_binding, {break_at, Bindings, Module, Line, Depth}},State0) ->
+handle_cast({break_at, {Bindings, Module, Line, Depth}},State0) ->
   {MFA, State} = get_mfa(State0, Module, Line),
   edts_rte:debug("1) send_binding.. before step. old depth:~p , new_depth:~p~n"
            , [State#rte_state.depth, Depth]),
   edts_rte:debug("2) send_binding.. Line:~p, Bindings:~p~n",[Line, Bindings]),
 
-  edts_rte:debug("3) old mfa:~p~n", [State#rte_state.mfa]),
   edts_rte:debug("4) new mfa:~p~n", [MFA]),
 
   %% get mfa and add one level if it is not main function
@@ -215,8 +220,8 @@ handle_cast({send_binding, {break_at, Bindings, Module, Line, Depth}},State0) ->
   {ReplacedFuns, MFAInfoL} =
     case State#rte_state.depth > Depth of
       true  ->
-        edts_rte:debug( "send replaced fun..~n mfa:~p~nbinding:~p~nDepth:~p~n"
-                      , [State#rte_state.mfa, Bindings, Depth]),
+        edts_rte:debug( "send replaced fun..~nbinding:~p~nDepth:~p~n"
+                      , [Bindings, Depth]),
 
         %% Pop function up till function's depth <= Depth
         {OutputMFAInfo, RestMFAInfo} =
@@ -238,8 +243,7 @@ handle_cast({send_binding, {break_at, Bindings, Module, Line, Depth}},State0) ->
   edts_rte_int_listener:step(),
 
   %% save current bindings for further use
-  {noreply, State#rte_state{ mfa = MFA
-                           , depth = Depth
+  {noreply, State#rte_state{ depth = Depth
                            , mfa_info_list = MFAInfo
                            , replaced_funs = ReplacedFuns}};
 handle_cast(exit, #rte_state{} = State) ->
