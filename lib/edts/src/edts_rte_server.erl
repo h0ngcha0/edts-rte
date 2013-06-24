@@ -159,29 +159,24 @@ init([]) ->
   {ok, #rte_state{record_table = RcdTbl}}.
 
 handle_call({rte_run, Module, Fun, Args0}, _From, State) ->
-  RcdTbl   = State#rte_state.record_table,
   %% try to read the record from the current module.. right now this is the
   %% only record support
+  RcdTbl   = State#rte_state.record_table,
   AddedRds = edts_rte_erlang:read_and_add_records(Module, RcdTbl),
-  edts_rte:debug("AddedRds:~p~n", [AddedRds]),
+  edts_rte:debug("added record definitions:~p~n", [AddedRds]),
+
   Args     = binary_to_list(Args0),
   ArgsTerm = edts_rte_erlang:convert_list_to_term(Args, RcdTbl),
-  edts_rte:debug("ArgsTerm:~p~n", [ArgsTerm]),
+  edts_rte:debug("arguments:~p~n", [ArgsTerm]),
+
+  %% set breakpoints
   [Module] = edts_rte_int_listener:interpret_modules([Module]),
   Arity    = length(ArgsTerm),
-  edts_rte:debug("Arity:~p~n", [Arity]),
   {ok, set, {Module, Fun, Arity}} =
     edts_rte_int_listener:set_breakpoint(Module, Fun, Arity),
-  edts_rte:debug("rte_run: after setbreakpoint~n"),
-  RTEFun   = fun() ->
-               Result = try
-                          erlang:apply(Module, Fun, ArgsTerm)
-                        catch
-                          T:E -> lists:flatten(io_lib:format("~p:~p", [T, E]))
-                        end,
-               edts_rte:debug("RTE Result:~p~n", [Result]),
-               send_rte_result(make_result({Module, Fun, Arity, Result}))
-             end,
+
+  %% run mfa
+  RTEFun   = make_rte_run(Module, Fun, ArgsTerm),
   Pid      = erlang:spawn(RTEFun),
   edts_rte:debug("called function pid:~p~n", [Pid]),
   {reply, {ok, finished}, State#rte_state{ depth         = 0
@@ -225,7 +220,7 @@ handle_cast({break_at, {Bindings, Module, Line, Depth}},State0) ->
            , [State#rte_state.depth, Depth]),
   edts_rte:debug("2) send_binding.. Line:~p, Bindings:~p~n",[Line, Bindings]),
 
-  edts_rte:debug("4) new mfa:~p~n", [MFA]),
+  edts_rte:debug("3) new mfa:~p~n", [MFA]),
 
   %% get mfa and add one level if it is not main function
   %% output sub function body when the process leaves it.
@@ -273,26 +268,24 @@ handle_cast(_Msg, State) ->
 %% @doc Generate the replaced functions based on the mfa_info list
 -spec generate_replaced_funs([mfa_info()]) -> string().
 generate_replaced_funs(MFAInfoList) ->
-  lists:foldl(
-    fun(MFAInfo, Funs) ->
-      {M, F, A, D} = MFAInfo#mfa_info.key,
-      MFA = {M, F, A},
-      ReplacedFun = replace_var_in_fun_body(MFA, D, MFAInfo),
-      [{M, F, A, ReplacedFun} | Funs]
-    end, [], MFAInfoList).
+  lists:foldl(fun(MFAInfo, Funs) ->
+                {M, F, A, D} = MFAInfo#mfa_info.key,
+                MFA = {M, F, A},
+                ReplacedFun = replace_var_in_fun_body(MFA, D, MFAInfo),
+                [{M, F, A, ReplacedFun} | Funs]
+              end, [], MFAInfoList).
 
-%% @doc Called when an RTE run is finished. Generate the replaced
+%% @doc Called when an RTE run is about to finish. Generate the replaced
 %%      functions and send them to the clients.
 -spec on_exit(undefined | string(), state()) -> state().
 on_exit(undefined, State) ->
   State;
 on_exit(RteResult, State) ->
-  AllReplacedFuns = State#rte_state.replaced_funs ++
-                    lists:reverse(
-                      generate_replaced_funs(
-                        State#rte_state.mfa_info_list)),
+  AllReplacedFuns =
+    State#rte_state.replaced_funs ++
+    lists:reverse(generate_replaced_funs(State#rte_state.mfa_info_list)),
 
-  send_result_to_clients(RteResult, concat_replaced_funs(AllReplacedFuns)),
+  ok = send_result_to_clients(RteResult, concat_replaced_funs(AllReplacedFuns)),
   State.
 
 %%------------------------------------------------------------------------------
@@ -395,7 +388,7 @@ make_comments(M, F, A) ->
                           , line(), bindings(), [mfa_info()]) -> [mfa_info()].
 update_mfa_info_list({M, F, A}, Depth, Line, Bindings, MFAInfoL) ->
   Key = {M, F, A, Depth},
-  edts_rte:debug("6) params:~p~n", [[MFAInfoL, Key, Line]]),
+  edts_rte:debug("6) upd mfa_info list params:~p~n", [[MFAInfoL, Key, Line]]),
   AddNewMFAInfoP = add_new_mfa_info_p(MFAInfoL, Key, Line),
   edts_rte:debug("7) app_p.......:~p~n", [AddNewMFAInfoP]),
   case AddNewMFAInfoP of
@@ -515,6 +508,19 @@ mk_editor(Id, FunBody) ->
  lists:flatten( io_lib:format(
                   "{\"x\":74,\"y\":92,\"z\":1,\"id\":\"~s\",\"code\":\"~s\"}"
               , [Id, FunBody])).
+
+%% @doc Make the function to execute the MFA.
+-spec make_rte_run(module(), function(), [term()]) -> fun(() -> ok).
+make_rte_run(Module, Fun, ArgsTerm) ->
+  fun() ->
+    Result = try
+               erlang:apply(Module, Fun, ArgsTerm)
+             catch
+               T:E -> lists:flatten(io_lib:format("~p:~p", [T, E]))
+             end,
+    edts_rte:debug("RTE Result:~p~n", [Result]),
+    send_rte_result(make_result({Module, Fun, length(ArgsTerm), Result}))
+  end.
 
 %% @doc Escape the chars in a given list from a string.
 -spec string_escape_chars(string(), [string()]) -> string().
