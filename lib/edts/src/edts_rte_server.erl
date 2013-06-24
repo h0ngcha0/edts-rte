@@ -252,6 +252,13 @@ handle_cast({break_at, {Bindings, Module, Line, Depth}},State0) ->
         {State#rte_state.replaced_funs, State#rte_state.mfa_info_list}
     end,
 
+  %% use this:
+  %% case add_new_mfa_info_p(MFAInfoL, Key, Line) of
+  %% this function basically returns true when we are in a different function
+  %% compared to last time. so we should pop it out.
+  %
+      
+
   MFAInfo = update_mfa_info_list(MFA, Depth, Line, Bindings, MFAInfoL),
   edts_rte_int_listener:step(),
 
@@ -275,11 +282,11 @@ handle_cast(_Msg, State) ->
 generate_replaced_funs(MFAInfoList) ->
   lists:foldl(
     fun(MFAInfo, Funs) ->
-           {M, F, A, D} = MFAInfo#mfa_info.key,
-           MFA = {M, F, A},
-           ReplacedFun = replace_var_in_fun_body(MFA, D, MFAInfo),
-           [{M, F, A, ReplacedFun} | Funs]
-          end, [], MFAInfoList).
+      {M, F, A, D} = MFAInfo#mfa_info.key,
+      MFA = {M, F, A},
+      ReplacedFun = replace_var_in_fun_body(MFA, D, MFAInfo),
+      [{M, F, A, ReplacedFun} | Funs]
+    end, [], MFAInfoList).
 
 %% @doc Called when an RTE run is finished. Generate the replaced
 %%      functions and send them to the clients.
@@ -287,8 +294,11 @@ generate_replaced_funs(MFAInfoList) ->
 on_exit(undefined, State) ->
   State;
 on_exit(RteResult, State) ->
-  AllReplacedFuns = generate_replaced_funs(State#rte_state.mfa_info_list) ++
-                    State#rte_state.replaced_funs,
+  AllReplacedFuns = State#rte_state.replaced_funs ++ 
+                    lists:reverse(
+                      generate_replaced_funs(
+                        State#rte_state.mfa_info_list)),
+
   send_result_to_clients(RteResult, concat_replaced_funs(AllReplacedFuns)),
   State.
 
