@@ -65,8 +65,6 @@
                                                          | pid()
                    , record_table          = undefined  :: atom()
                    , depth                 = 0          :: depth()
-                   , calling_mfa_info_list = []         :: [mfa_info()]
-                   , called_mfa_info_list  = []         :: list()  %% FIXME type
                    , mfa_info_tree         = []         :: list()  %% FIXME type
                    , result                = undefined  :: term()
                    , module_cache          = []         :: list()  %% FIXME type
@@ -190,10 +188,8 @@ handle_call({rte_run, Module, Fun, Args0}, _From, State) ->
                       },
 
   {reply, {ok, finished}, State#rte_state{ depth                 = 0
-                                         , calling_mfa_info_list = []
                                          , module_cache          = []
                                          , proc                  = Pid
-                                         , called_mfa_info_list  = []
                                          , mfa_info_tree         = [MFAInfo]
                                          , result                = undefined
                                          , exit_p                = false
@@ -225,52 +221,21 @@ handle_cast({finished_attach, Pid}, State) ->
   edts_rte_int_listener:step(),
   edts_rte:debug("finish attach.....~n"),
   {noreply, State};
-handle_cast({break_at, {Bindings, Module, Line, Depth}},State0) ->
-  {MFA, State1} = get_mfa(State0, Module, Line),
+handle_cast({break_at, {Bindings, Module, Line, Depth}}, State0) ->
+  {MFA, State} = get_mfa(State0, Module, Line),
   edts_rte:debug("1) send_binding.. before step. old depth:~p , new_depth:~p~n"
-           , [State1#rte_state.depth, Depth]),
+           , [State#rte_state.depth, Depth]),
   edts_rte:debug("2) send_binding.. Line:~p, Bindings:~p~n",[Line, Bindings]),
 
   edts_rte:debug("3) new mfa:~p~n", [MFA]),
 
-  %% get mfa and add one level if it is not main function
-  %% output sub function body when the process leaves it.
-  %% Only step into one more depth right now.
-  %% {CalledMFAInfoList, CallingMFAInfoList0} =
-  State2 =
-    case State1#rte_state.depth > Depth of
-      true  ->
-        edts_rte:debug( "send replaced fun..~nbinding:~p~nDepth:~p~n"
-                      , [Bindings, Depth]),
-
-        %% Pop function up till function's depth <= Depth
-        {OutputMFAInfo, RestMFAInfo} =
-          lists:splitwith(fun(MFAInfoS) ->
-                              {_M, _F, _A, D} = MFAInfoS#mfa_info.key,
-                              D > Depth
-                          end, State1#rte_state.calling_mfa_info_list),
-        edts_rte:debug("4) OutputMFAInfo:~p~n", [OutputMFAInfo]),
-        edts_rte:debug("5) RestMFAInfo:~p~n", [RestMFAInfo]),
-
-        %% assert
-        true = (length(OutputMFAInfo) =:= 1),
-
-        %% output function bodies
-        CalledMFAInfoList =
-          OutputMFAInfo ++ State1#rte_state.called_mfa_info_list,
-        State1#rte_state{ called_mfa_info_list  = CalledMFAInfoList
-                        , calling_mfa_info_list = RestMFAInfo};
-      false ->
-        State1
-    end,
-
-  State = update_mfa_info_list(MFA, Depth, Line, Bindings, State2),
-  NewMFAInfoTree = update_mfa_info_tree(MFA, Depth, Line, Bindings, State#rte_state.mfa_info_tree),
+  NewMFAInfoTree = update_mfa_info_tree( MFA, Depth, Line, Bindings
+                                       , State#rte_state.mfa_info_tree),
 
   %% continue to step
   edts_rte_int_listener:step(),
 
-  {noreply, State#rte_state{depth = Depth, mfa_info_tree=NewMFAInfoTree}};
+  {noreply, State#rte_state{depth = Depth, mfa_info_tree = NewMFAInfoTree}};
 handle_cast(exit, #rte_state{result = RteResult} = State0) ->
   edts_rte:debug("rte server got exit~n"),
   State = on_exit(RteResult, State0),
@@ -345,23 +310,11 @@ find_function(L, [[L0, _F, _A] = LFA | T]) ->
     false -> find_function(L, T)
   end.
 
-%% @doc Generate the replaced functions based on the mfa_info list
--spec make_replaced_funs([mfa_info()]) -> string().
-make_replaced_funs(MFAInfoList) ->
-  lists:foldl(fun(MFAInfo, Funs) ->
-                Key = MFAInfo#mfa_info.key,
-                ReplacedFun = make_replaced_fun(Key, MFAInfo),
-                [{Key, ReplacedFun} | Funs]
-              end, [], MFAInfoList).
-
 %% @doc Generate the replaced function based on the mfa_info
-make_replaced_fun(MFAD, MFAInfoS) ->
-  #mfa_info{ key            = Key
-           , bindings       = Bindings
+make_replaced_fun(MFAInfoS) ->
+  #mfa_info{ bindings       = Bindings
            , fun_form       = FunAbsForm
            , clause_structs = AllClausesLn} = MFAInfoS,
-  %% assert
-  Key = MFAD,
   edts_rte_erlang:var_to_val_in_fun(FunAbsForm, AllClausesLn, Bindings).
 
 %% @doc Called when an RTE run is about to finish. Generate the replaced
@@ -370,11 +323,8 @@ make_replaced_fun(MFAD, MFAInfoS) ->
 on_exit(undefined, State) ->
   State;
 on_exit(Result, State) ->
-  AllMFAInfo = State#rte_state.called_mfa_info_list ++
-               State#rte_state.calling_mfa_info_list,
-  AllReplacedFuns = lists:reverse(make_replaced_funs(AllMFAInfo)),
+  AllReplacedFuns = print_mfa_info_tree(State#rte_state.mfa_info_tree),
   ok = send_result_to_clients(Result, concat_replaced_funs(AllReplacedFuns)),
-
   io:format("======= mfa_info_tree: ~p~n",[State#rte_state.mfa_info_tree]),
   State.
 
@@ -527,133 +477,18 @@ update_mfa_info(MFAInfo, Line, Bindings) ->
                   , line           = Line
                   , bindings       = Bindings}.
 
-%% @doc  Either create a new mfa_info at the top of the calling mfa_info list
-%%       or update the first element of the calling mfa_info list based on the
-%%       new information. @see `add_new_mfa_info_p'
-%%
-%% NOTE: if the clauses are unfortunately programmed in the same line
-%%       then rte shall feel confused and refuse to display any value of
-%%       the variables.
--spec update_mfa_info_list( {module(), function(), arity()}, depth()
-                          , line(), bindings(), [mfa_info()]) -> [mfa_info()].
-update_mfa_info_list({M, F, A}, Depth, Line, Bindings, State0) ->
-  Key = {M, F, A, Depth},
-  edts_rte:debug( "6) upd calling mfa_info list params:~p~n"
-                , [[State0#rte_state.calling_mfa_info_list, Key, Line]]),
-  PopCallingMFAInfoP   = pop_calling_mfa_info_p(
-                           State0#rte_state.calling_mfa_info_list,
-                           Key, Line, Depth),
-  edts_rte:debug("7) pop calling mfa info p..:~p~n", [PopCallingMFAInfoP]),
-  State =
-    case PopCallingMFAInfoP of
-      false ->
-        State0;
-      true  ->
-        NewCallingMFAInfoL = tl(State0#rte_state.calling_mfa_info_list),
-        NewCalledMFAInfoL  = [ hd(State0#rte_state.calling_mfa_info_list)
-                             | State0#rte_state.called_mfa_info_list],
-        State0#rte_state{ calling_mfa_info_list = NewCallingMFAInfoL
-                        , called_mfa_info_list  = NewCalledMFAInfoL }
-    end,
+print_mfa_info_tree([MFAInfo])   ->
+  do_print_mfa_info_tree(MFAInfo#mfa_info.children, []);
+print_mfa_info_tree([_H1, H2|T]) ->
+  do_print_mfa_info_tree([H2|T], []).
 
-  CallingMFAInfoL = State#rte_state.calling_mfa_info_list,
-  AddCallingMFAInfoP = add_new_calling_mfa_info_p(CallingMFAInfoL, Key, Line),
-  edts_rte:debug("8) add new calling mfa info p..:~p~n", [AddCallingMFAInfoP]),
-
-  UpdatedCallingMFAInfoL =
-    case AddCallingMFAInfoP of
-      true ->
-        %% add new mfa_info
-        {ok, FunAbsForm} = edts_code:get_function_body(M, F, A),
-        AllClausesLn0    = edts_rte_erlang:extract_fun_clauses_line_num(
-                             FunAbsForm),
-        AllClausesLn     = edts_rte_erlang:traverse_clause_struct(
-                             Line, AllClausesLn0),
-        [ #mfa_info{ key            = Key
-                   , line           = Line
-                   , fun_form       = FunAbsForm
-                   , clause_structs = AllClausesLn
-                   , bindings       = Bindings}
-        | CallingMFAInfoL];
-      false ->
-        #mfa_info{key= Key, clause_structs = AllClausesLn}
-          = Val = hd(CallingMFAInfoL),
-        TraversedLns =
-          edts_rte_erlang:traverse_clause_struct(Line, AllClausesLn),
-        [ Val#mfa_info{ clause_structs = TraversedLns
-                      , line           = Line
-                      , bindings       = Bindings}
-        | tl(CallingMFAInfoL)]
-    end,
-  State#rte_state{calling_mfa_info_list = UpdatedCallingMFAInfoL}.
-
-%% @doc Return true when a new calling mfa_info needs to be added.
-%%      This will happen when:
-%%      1) The NewKey is not the same as that of the first element of the
-%%         mfa_info_list.
-%%      2) Tail recursion
--spec add_new_calling_mfa_info_p( [mfa_info()], mfa_info_key(), line()) ->
-                                    boolean().
-add_new_calling_mfa_info_p(MFAInfoList, NewKey, NewLine) ->
-  case key_of_first_elem_p(NewKey, MFAInfoList) of
-    false ->
-      true;
-    true  ->
-      MFAInF = hd(MFAInfoList),
-      TailP  = edts_rte_erlang:is_tail_recursion( MFAInF#mfa_info.clause_structs
-                                                , MFAInF#mfa_info.line
-                                                , NewLine),
-      %% assert that it is not tail recursion
-      false = TailP,
-      false
-  end.
-
-pop_calling_mfa_info_p(CallingMFAInfoList, NewKey, NewLine, NewDepth) ->
-  case try_get_hd(CallingMFAInfoList) of
-    false ->
-      false;
-    {ok, MFAInfo} ->
-      case MFAInfo#mfa_info.key =:= NewKey of
-        true  ->
-          %% this will rule out the case where we are stepping within
-          %% the same function clause.
-          edts_rte_erlang:is_tail_recursion( MFAInfo#mfa_info.clause_structs
-                                           , MFAInfo#mfa_info.line
-                                           , NewLine);
-        false ->
-          {_M, _F, _A, Depth} = MFAInfo#mfa_info.key,
-          NewDepth =:= Depth
-      end
-  end.
-
-%% %% @doc Get the current calling mfa_info.
-%% -spec try_get_current(list()) -> {ok, mfa_info()} | false.
-%% try_get_current([]) ->
-%%   false;
-%% try_get_current([#mfa_info{is_current = true} = MFAInfo]) ->
-%%   {ok, MFAInfo};
-%% try_get_current([#mfa_info{is_current = false} = MFAInfo]) ->
-%%   try_get_current(MFAInfo#mfa_info.children);
-%% try_get_current([H|T]) ->
-%%   try_get_current(T).
-
-
-%% @doc check if the key is the key of the first element in the MFAInfoList
-%%      list.
--spec key_of_first_elem_p(mfa_info_key(), [mfa_info()]) -> boolean().
-key_of_first_elem_p(Key, MFAInfoList) ->
-  case try_get_hd(MFAInfoList) of
-    {ok, MFAInfo} -> MFAInfo#mfa_info.key =:= Key;
-    false         -> false
-  end.
-
-%% @doc Get the hd a list: `HEAD'. If the list is empty, return false.
-%%      Otherwise return {ok, `Head'}
--spec try_get_hd(list()) -> false | {ok, any()}.
-try_get_hd([])     ->
-  false;
-try_get_hd([H|_T]) ->
-  {ok, H}.
+do_print_mfa_info_tree([], Acc) ->
+  lists:reverse(Acc);
+do_print_mfa_info_tree([MFAInfo|T], Acc0) ->
+  ReplacedFun = make_replaced_fun(MFAInfo),
+  Acc = do_print_mfa_info_tree( MFAInfo#mfa_info.children
+                              , [{MFAInfo#mfa_info.key, ReplacedFun}|Acc0]),
+  do_print_mfa_info_tree(T, Acc).
 
 %% @doc The name of the ETS table to store the tuple representation of
 %%      the records
