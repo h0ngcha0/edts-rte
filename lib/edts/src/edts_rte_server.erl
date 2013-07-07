@@ -52,22 +52,21 @@
 %%%_* Defines ==================================================================
 -define(SERVER, ?MODULE).
 
--record(mfa_info, { key            :: mfa_info_key()
-                  , fun_form       :: term()  %% FIXME type
-                  , clause_structs :: term()  %% FIXME type
-                  , line           :: line()
-                  , bindings       :: bindings()
-                  , is_current     :: boolean()
+-record(mfa_info, { bindings       :: bindings()
                   , children       :: [mfa_info()]
+                  , clause_structs :: term()  %% FIXME type
+                  , fun_form       :: term()  %% FIXME type
+                  , is_current     :: boolean()
+                  , key            :: mfa_info_key()
+                  , line           :: line()
                   }).
 
--record(rte_state, { proc                  = unattached :: unattached
-                                                         | pid()
-                   , record_table          = undefined  :: atom()
+-record(rte_state, { exit_p                = false      :: boolean()
                    , mfa_info_tree         = []         :: list()  %% FIXME type
-                   , result                = undefined  :: term()
                    , module_cache          = []         :: list()  %% FIXME type
-                   , exit_p                = false      :: boolean()
+                   , proc                  = unattached :: unattached | pid()
+                   , record_table          = undefined  :: atom()
+                   , result                = undefined  :: term()
                    }).
 
 %%%_* Types ====================================================================
@@ -134,7 +133,7 @@ send_exit() ->
 %% FIXME: need to come up with a way to add all existing records from
 %%        a project and remove records when recompile a particular module
 read_and_add_records(Module) ->
-  edts_rte_erlang:read_and_add_records(Module, record_table_name()).
+  edts_rte_util:read_and_add_records(Module, record_table_name()).
 
 %%%_* gen_server callbacks  ====================================================
 %%------------------------------------------------------------------------------
@@ -162,11 +161,11 @@ handle_call({rte_run, Module, Fun, Args0}, _From, State) ->
   %% try to read the record from the current module.. right now this is the
   %% only record support
   RcdTbl   = State#rte_state.record_table,
-  AddedRds = edts_rte_erlang:read_and_add_records(Module, RcdTbl),
+  AddedRds = edts_rte_util:read_and_add_records(Module, RcdTbl),
   edts_rte:debug("added record definitions:~p~n", [AddedRds]),
 
   Args     = binary_to_list(Args0),
-  ArgsTerm = edts_rte_erlang:convert_list_to_term(Args, RcdTbl),
+  ArgsTerm = edts_rte_util:convert_list_to_term(Args, RcdTbl),
   edts_rte:debug("arguments:~p~n", [ArgsTerm]),
 
   %% set breakpoints
@@ -176,8 +175,7 @@ handle_call({rte_run, Module, Fun, Args0}, _From, State) ->
     edts_rte_int_listener:set_breakpoint(Module, Fun, Arity),
 
   %% run mfa
-  RTEFun   = make_rte_run(Module, Fun, ArgsTerm),
-  Pid      = erlang:spawn(RTEFun),
+  Pid      = erlang:spawn(make_rte_run_fun(Module, Fun, ArgsTerm)),
   edts_rte:debug("called function pid:~p~n", [Pid]),
 
   %% root element of the mfa_info_tree
@@ -286,33 +284,44 @@ send_rte_result(Result) ->
 %%      info for a particular module and do not use the change of the depth
 %%      as the indicator that a new mfa should be calculated. It is too
 %%      expensive if no such caching is performed,
+-spec get_mfa(state(), module(), line()) ->
+                 {{module(), function(), arity()}, state()}.
 get_mfa(State, Module, Line) ->
   case orddict:find(Module, State#rte_state.module_cache) of
     error ->
-      ModFunInfo  = edts_rte_erlang:get_module_sorted_fun_info(Module),
+      ModFunInfo  = edts_rte_util:get_module_sorted_fun_info(Module),
       NewModCache = orddict:store( Module, ModFunInfo
                                  , State#rte_state.module_cache),
-      [_L, F, A]  = find_function(Line, ModFunInfo),
-      {{Module, F, A}, State#rte_state{module_cache = NewModCache}};
+      {Function, Arity}  = find_function(Line, ModFunInfo),
+      {{Module, Function, Arity}, State#rte_state{module_cache = NewModCache}};
     {ok, ModFunInfo} ->
-      [_L, F, A]  = find_function(Line, ModFunInfo),
-      {{Module, F, A}, State}
+      {Function, Arity}  = find_function(Line, ModFunInfo),
+      {{Module, Function, Arity}, State}
   end.
 
+%% @doc Try to find the first function the line of which is smaller
+%%      than the given line.
+-spec find_function(line(), [{line, function(), arity()}]) ->
+                       {function(), arity()} | not_found.
 find_function(_L, [])                      ->
-  [];
-find_function(L, [[L0, _F, _A] = LFA | T]) ->
+  not_found;
+find_function(L, [[L0, F, A] | T]) ->
   case L >= L0 of
-    true  -> LFA;
+    true  -> {F, A};
     false -> find_function(L, T)
   end.
 
 %% @doc Generate the replaced function based on the mfa_info
-make_replaced_fun(MFAInfoS) ->
-  #mfa_info{ bindings       = Bindings
+replace_var_with_val(MFAInfo) ->
+  #mfa_info{ key            = Key
+           , bindings       = Bindings
            , fun_form       = FunAbsForm
-           , clause_structs = AllClausesLn} = MFAInfoS,
-  edts_rte_erlang:var_to_val_in_fun(FunAbsForm, AllClausesLn, Bindings).
+           , clause_structs = AllClausesLn} = MFAInfo,
+  {_Mod, _Fun, _Arity, Depth} = Key,
+  FunStr0 = edts_rte_util:var_to_val_in_fun(FunAbsForm, AllClausesLn, Bindings),
+  FunStr  = re:replace( FunStr0, "\n", "\n"++indent_str(Depth)
+                      , [{return, list}, global]),
+  indent_str(Depth) ++ FunStr.
 
 %% @doc Called when an RTE run is about to finish. Generate the replaced
 %%      functions and send them to the clients.
@@ -320,30 +329,10 @@ make_replaced_fun(MFAInfoS) ->
 on_exit(undefined, State) ->
   State;
 on_exit(Result, State) ->
-  AllReplacedFuns = print_mfa_info_tree(State#rte_state.mfa_info_tree),
-  ok = send_result_to_clients(Result, concat_replaced_funs(AllReplacedFuns)),
+  AllReplacedFuns = mfa_info_tree_form_to_str(State#rte_state.mfa_info_tree),
+  ok = send_result_to_clients(Result, concat_funs_str(AllReplacedFuns)),
   edts_rte:debug("======= mfa_info_tree: ~p~n",[State#rte_state.mfa_info_tree]),
   State.
-
-%% @doc Concat a list of replaced function strings together.
--spec concat_replaced_funs([{Key, string()}]) -> string()
-         when Key :: {module(), function(), arity()}.
-concat_replaced_funs(ReplacedFuns) ->
-  lists:foldl(
-    fun({{M, F, A, D}, RplFun}, RplFuns) ->
-        lists:flatten(
-          io_lib:format( "~s~n~s~n~s~n"
-                       , [make_comments(M, F, A, D), RplFun, RplFuns]))
-    end, [], ReplacedFuns).
-
-make_result({M, F, A, RteResult}) ->
-  lists:flatten(io_lib:format("%% ========== Generated by RTE ==========~n"
-                              "%% ~p:~p/~p ---> ~p~n~n", [M, F, A, RteResult])).
-
-%% @doc Make the comments to display on the client
-make_comments(M, F, A, D) ->
-  lists:flatten(io_lib:format("%% MFA   : {~p, ~p, ~p}:~n"
-                              "%% Level : ~p", [M, F, A, D])).
 
 %% @doc Update the mfa_info_tree.
 %%      The current mfa_info element should only be along the
@@ -357,9 +346,8 @@ update_mfa_info_tree( {Mod, Fun, Arity}, Depth, Line, Bindings
       %% assert that it can not be a tail call here. because
       %% the tail call scenario should be handled by the
       %% ancester of this element already.
-      false  = edts_rte_erlang:is_tail_call(
-                 MFAInfo#mfa_info.clause_structs,
-                 MFAInfo#mfa_info.line, Line),
+      false  = edts_rte_util:is_tail_call( MFAInfo#mfa_info.clause_structs
+                                         , MFAInfo#mfa_info.line, Line),
 
       %% the interpreter steps forward within the same function, so
       %% just need to update the current mfa_info.
@@ -442,8 +430,8 @@ add_child(Mod, Fun, Arity, Depth, Line, Bindings, MFAInfo) ->
   NewSibling  = new_mfa_info( Mod, Fun, Arity, Depth, Line, Bindings),
   NewChildren = set_current_false(Children) ++ [NewSibling],
   MFAInfo#mfa_info{ is_current = false
-                  , children = NewChildren}.  
-  
+                  , children = NewChildren}.
+
 %% @doc Check if a sibling should be added for a mfa_info element. This
 %%      could happen in two scenarios:
 %%      1) the mfa is not the same, but the depth is the same
@@ -453,9 +441,9 @@ add_sibling_p(MFAInfo, NewKey, NewLine, NewDepth) ->
     true  ->
       %% this will rule out the case where we are stepping within
       %% the same function clause.
-      edts_rte_erlang:is_tail_call( MFAInfo#mfa_info.clause_structs
-                                  , MFAInfo#mfa_info.line
-                                  , NewLine);
+      edts_rte_util:is_tail_call( MFAInfo#mfa_info.clause_structs
+                                , MFAInfo#mfa_info.line
+                                , NewLine);
     false ->
       {_M, _F, _A, Depth} = MFAInfo#mfa_info.key,
       NewDepth =:= Depth
@@ -476,8 +464,8 @@ set_current_false([MFAInfo|T]) ->
                   -> mfa_info().
 new_mfa_info(Module, Function, Arity, Depth, Line, Bindings) ->
   {ok, FunAbsForm} = edts_code:get_function_body(Module, Function, Arity),
-  AllClausesL0     = edts_rte_erlang:extract_fun_clauses_line_num(FunAbsForm),
-  AllClausesL      = edts_rte_erlang:traverse_clause_struct(Line, AllClausesL0),
+  AllClausesL0     = edts_rte_util:extract_fun_clauses_line_num(FunAbsForm),
+  AllClausesL      = edts_rte_util:traverse_clause_struct(Line, AllClausesL0),
   #mfa_info{ key            = {Module, Function, Arity, Depth}
            , line           = Line
            , fun_form       = FunAbsForm
@@ -489,27 +477,65 @@ new_mfa_info(Module, Function, Arity, Depth, Line, Bindings) ->
 %% @doc Update the mfa_info element
 -spec update_mfa_info(mfa_info(), line(), bindings()) -> mfa_info().
 update_mfa_info(MFAInfo, Line, Bindings) ->
-  ClauseStructs = edts_rte_erlang:traverse_clause_struct(
+  ClauseStructs = edts_rte_util:traverse_clause_struct(
                     Line, MFAInfo#mfa_info.clause_structs),
   MFAInfo#mfa_info{ clause_structs = ClauseStructs
                   , line           = Line
                   , bindings       = Bindings}.
 
-print_mfa_info_tree([MFAInfo])   ->
-  lists:reverse(do_print_mfa_info_tree(MFAInfo#mfa_info.children, [])).
+%% @doc Convert the function form of each of the mfa_info element in the
+%%      mfa_info_tree to its string representation, Return them as a list
+%%      together with their corresponding mfa_info_key.
+-spec mfa_info_tree_form_to_str([mfa_info()]) -> [{mfa_info_key(), string()}].
+mfa_info_tree_form_to_str([MFAInfo])   ->
+  lists:reverse(mfa_info_tree_do_form_to_str(MFAInfo#mfa_info.children, [])).
 
-do_print_mfa_info_tree([], Acc) ->
+%% @doc In-order traverse the mfa_info_tree
+mfa_info_tree_do_form_to_str([], Acc) ->
   Acc;
-do_print_mfa_info_tree([MFAInfo|T], Acc) ->
-  ReplacedFun = make_replaced_fun(MFAInfo),
-  AccChildren = do_print_mfa_info_tree(MFAInfo#mfa_info.children, []),
-  do_print_mfa_info_tree(T, Acc ++ [{MFAInfo#mfa_info.key, ReplacedFun} | AccChildren]).
+mfa_info_tree_do_form_to_str([MFAInfo|T], Acc0) ->
+  ReplacedFun = replace_var_with_val(MFAInfo),
+  AccChildren = mfa_info_tree_do_form_to_str(MFAInfo#mfa_info.children, []),
+  Acc         = Acc0 ++ [{MFAInfo#mfa_info.key, ReplacedFun} | AccChildren],
+  mfa_info_tree_do_form_to_str(T, Acc).
 
 %% @doc The name of the ETS table to store the tuple representation of
 %%      the records
 -spec record_table_name() -> atom().
 record_table_name() ->
   edts_rte_record_table.
+
+%% @doc Concat a list of replaced function strings together.
+-spec concat_funs_str([{Key, string()}]) -> string()
+         when Key :: {module(), function(), arity()}.
+concat_funs_str(ReplacedFuns) ->
+  lists:foldl(
+    fun({{M, F, A, D}, RplFun}, RplFuns) ->
+        lists:flatten(
+          io_lib:format( "~s~n~s~n~s~n"
+                       , [make_comments_str(M, F, A, D), RplFun, RplFuns]))
+    end, [], ReplacedFuns).
+
+make_result_str({M, F, A, RteResult}) ->
+  lists:flatten(io_lib:format("%% ========== Generated by RTE ==========~n"
+                              "%% ~p:~p/~p ---> ~p~n~n", [M, F, A, RteResult])).
+
+%% @doc Make the comments to display on the client
+make_comments_str(M, F, A, D) ->
+  lists:flatten(io_lib:format(indent_str(D) ++ "%% MFA   : {~p, ~p, ~p}:~n" ++
+                              indent_str(D) ++ "%% Level : ~p", [M, F, A, D])).
+
+indent_str(D) ->
+  OneIndent = string:copies(indent_unit(), level_indent()),
+  string:copies(OneIndent, (D-2)).
+
+%% @doc the indent between levels
+level_indent() ->
+  4.
+
+%% @doc The unit for indentation. Prefer space.
+indent_unit() ->
+  " ".
 
 %% @doc Send the function body back to Clients.
 send_result_to_clients(RteResult, FunBody) ->
@@ -567,8 +593,8 @@ mk_editor(Id, FunBody) ->
               , [Id, FunBody])).
 
 %% @doc Make the function to execute the MFA.
--spec make_rte_run(module(), function(), [term()]) -> fun(() -> ok).
-make_rte_run(Module, Fun, ArgsTerm) ->
+-spec make_rte_run_fun(module(), function(), [term()]) -> fun(() -> ok).
+make_rte_run_fun(Module, Fun, ArgsTerm) ->
   fun() ->
     Result = try
                erlang:apply(Module, Fun, ArgsTerm)
@@ -576,7 +602,7 @@ make_rte_run(Module, Fun, ArgsTerm) ->
                T:E -> lists:flatten(io_lib:format("~p:~p", [T, E]))
              end,
     edts_rte:debug("RTE Result:~p~n", [Result]),
-    send_rte_result(make_result({Module, Fun, length(ArgsTerm), Result}))
+    send_rte_result(make_result_str({Module, Fun, length(ArgsTerm), Result}))
   end.
 
 %% @doc Escape the chars in a given list from a string.

@@ -17,12 +17,11 @@
 %%% @end
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-%% This Module deals with stuff related to the erlang internal programing
-%% constructs.
+%% This module contains the utility functions for edts rte
 %% Record related stuff are shamelessly copied from shell.erl
 
 %%%_* Module declaration =======================================================
--module(edts_rte_erlang).
+-module(edts_rte_util).
 
 %%%_* Exports =================================================================
 -export([ convert_list_to_term/2
@@ -632,8 +631,7 @@ replace_var_with_val_in_expr( {'receive', L, Clauses0, Int, Exprs0}
   {'receive', L, Clauses, Int, Expr};
 replace_var_with_val_in_expr( {record, _, _Name, _Fields} = Record
                             , _ECLn, _Bs)                                 ->
-  edts_rte_erlang:expand_records( edts_rte_server:record_table_name()
-                                , Record);
+  expand_records(edts_rte_server:record_table_name(), Record);
 replace_var_with_val_in_expr([Statement0|T], ECLn, Bs)                    ->
   Statement = replace_var_with_val_in_expr(Statement0, ECLn, Bs),
   [Statement | replace_var_with_val_in_expr(T, ECLn, Bs)];
