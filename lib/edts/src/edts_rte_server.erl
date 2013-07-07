@@ -313,10 +313,15 @@ find_function(L, [[L0, F, A] | T]) ->
 
 %% @doc Generate the replaced function based on the mfa_info
 replace_var_with_val(MFAInfo) ->
-  #mfa_info{ bindings       = Bindings
+  #mfa_info{ key            = Key
+           , bindings       = Bindings
            , fun_form       = FunAbsForm
            , clause_structs = AllClausesLn} = MFAInfo,
-  edts_rte_util:var_to_val_in_fun(FunAbsForm, AllClausesLn, Bindings).
+  {_Mod, _Fun, _Arity, Depth} = Key,
+  FunStr0 = edts_rte_util:var_to_val_in_fun(FunAbsForm, AllClausesLn, Bindings),
+  FunStr  = re:replace( FunStr0, "\n", "\n"++indent_str(Depth)
+                      , [{return, list}, global]),
+  indent_str(Depth) ++ FunStr.
 
 %% @doc Called when an RTE run is about to finish. Generate the replaced
 %%      functions and send them to the clients.
@@ -517,8 +522,20 @@ make_result_str({M, F, A, RteResult}) ->
 
 %% @doc Make the comments to display on the client
 make_comments_str(M, F, A, D) ->
-  lists:flatten(io_lib:format("%% MFA   : {~p, ~p, ~p}:~n"
-                              "%% Level : ~p", [M, F, A, D])).
+  lists:flatten(io_lib:format(indent_str(D) ++ "%% MFA   : {~p, ~p, ~p}:~n" ++
+                              indent_str(D) ++ "%% Level : ~p", [M, F, A, D])).
+
+indent_str(D) ->
+  OneIndent = string:copies(indent_unit(), level_indent()),
+  string:copies(OneIndent, (D-2)).
+
+%% @doc the indent between levels
+level_indent() ->
+  4.
+
+%% @doc The unit for indentation. Prefer space.
+indent_unit() ->
+  " ".
 
 %% @doc Send the function body back to Clients.
 send_result_to_clients(RteResult, FunBody) ->
