@@ -52,22 +52,21 @@
 %%%_* Defines ==================================================================
 -define(SERVER, ?MODULE).
 
--record(mfa_info, { key            :: mfa_info_key()
-                  , fun_form       :: term()  %% FIXME type
-                  , clause_structs :: term()  %% FIXME type
-                  , line           :: line()
-                  , bindings       :: bindings()
-                  , is_current     :: boolean()
+-record(mfa_info, { bindings       :: bindings()
                   , children       :: [mfa_info()]
+                  , clause_structs :: term()  %% FIXME type
+                  , fun_form       :: term()  %% FIXME type
+                  , is_current     :: boolean()
+                  , key            :: mfa_info_key()
+                  , line           :: line()
                   }).
 
--record(rte_state, { proc                  = unattached :: unattached
-                                                         | pid()
-                   , record_table          = undefined  :: atom()
+-record(rte_state, { exit_p                = false      :: boolean()
                    , mfa_info_tree         = []         :: list()  %% FIXME type
-                   , result                = undefined  :: term()
                    , module_cache          = []         :: list()  %% FIXME type
-                   , exit_p                = false      :: boolean()
+                   , proc                  = unattached :: unattached | pid()
+                   , record_table          = undefined  :: atom()
+                   , result                = undefined  :: term()
                    }).
 
 %%%_* Types ====================================================================
@@ -134,7 +133,7 @@ send_exit() ->
 %% FIXME: need to come up with a way to add all existing records from
 %%        a project and remove records when recompile a particular module
 read_and_add_records(Module) ->
-  edts_rte_erlang:read_and_add_records(Module, record_table_name()).
+  edts_rte_util:read_and_add_records(Module, record_table_name()).
 
 %%%_* gen_server callbacks  ====================================================
 %%------------------------------------------------------------------------------
@@ -162,11 +161,11 @@ handle_call({rte_run, Module, Fun, Args0}, _From, State) ->
   %% try to read the record from the current module.. right now this is the
   %% only record support
   RcdTbl   = State#rte_state.record_table,
-  AddedRds = edts_rte_erlang:read_and_add_records(Module, RcdTbl),
+  AddedRds = edts_rte_util:read_and_add_records(Module, RcdTbl),
   edts_rte:debug("added record definitions:~p~n", [AddedRds]),
 
   Args     = binary_to_list(Args0),
-  ArgsTerm = edts_rte_erlang:convert_list_to_term(Args, RcdTbl),
+  ArgsTerm = edts_rte_util:convert_list_to_term(Args, RcdTbl),
   edts_rte:debug("arguments:~p~n", [ArgsTerm]),
 
   %% set breakpoints
@@ -289,7 +288,7 @@ send_rte_result(Result) ->
 get_mfa(State, Module, Line) ->
   case orddict:find(Module, State#rte_state.module_cache) of
     error ->
-      ModFunInfo  = edts_rte_erlang:get_module_sorted_fun_info(Module),
+      ModFunInfo  = edts_rte_util:get_module_sorted_fun_info(Module),
       NewModCache = orddict:store( Module, ModFunInfo
                                  , State#rte_state.module_cache),
       [_L, F, A]  = find_function(Line, ModFunInfo),
@@ -312,7 +311,7 @@ make_replaced_fun(MFAInfoS) ->
   #mfa_info{ bindings       = Bindings
            , fun_form       = FunAbsForm
            , clause_structs = AllClausesLn} = MFAInfoS,
-  edts_rte_erlang:var_to_val_in_fun(FunAbsForm, AllClausesLn, Bindings).
+  edts_rte_util:var_to_val_in_fun(FunAbsForm, AllClausesLn, Bindings).
 
 %% @doc Called when an RTE run is about to finish. Generate the replaced
 %%      functions and send them to the clients.
@@ -357,9 +356,8 @@ update_mfa_info_tree( {Mod, Fun, Arity}, Depth, Line, Bindings
       %% assert that it can not be a tail call here. because
       %% the tail call scenario should be handled by the
       %% ancester of this element already.
-      false  = edts_rte_erlang:is_tail_call(
-                 MFAInfo#mfa_info.clause_structs,
-                 MFAInfo#mfa_info.line, Line),
+      false  = edts_rte_util:is_tail_call( MFAInfo#mfa_info.clause_structs
+                                         , MFAInfo#mfa_info.line, Line),
 
       %% the interpreter steps forward within the same function, so
       %% just need to update the current mfa_info.
@@ -453,9 +451,9 @@ add_sibling_p(MFAInfo, NewKey, NewLine, NewDepth) ->
     true  ->
       %% this will rule out the case where we are stepping within
       %% the same function clause.
-      edts_rte_erlang:is_tail_call( MFAInfo#mfa_info.clause_structs
-                                  , MFAInfo#mfa_info.line
-                                  , NewLine);
+      edts_rte_util:is_tail_call( MFAInfo#mfa_info.clause_structs
+                                , MFAInfo#mfa_info.line
+                                , NewLine);
     false ->
       {_M, _F, _A, Depth} = MFAInfo#mfa_info.key,
       NewDepth =:= Depth
@@ -476,8 +474,8 @@ set_current_false([MFAInfo|T]) ->
                   -> mfa_info().
 new_mfa_info(Module, Function, Arity, Depth, Line, Bindings) ->
   {ok, FunAbsForm} = edts_code:get_function_body(Module, Function, Arity),
-  AllClausesL0     = edts_rte_erlang:extract_fun_clauses_line_num(FunAbsForm),
-  AllClausesL      = edts_rte_erlang:traverse_clause_struct(Line, AllClausesL0),
+  AllClausesL0     = edts_rte_util:extract_fun_clauses_line_num(FunAbsForm),
+  AllClausesL      = edts_rte_util:traverse_clause_struct(Line, AllClausesL0),
   #mfa_info{ key            = {Module, Function, Arity, Depth}
            , line           = Line
            , fun_form       = FunAbsForm
@@ -489,7 +487,7 @@ new_mfa_info(Module, Function, Arity, Depth, Line, Bindings) ->
 %% @doc Update the mfa_info element
 -spec update_mfa_info(mfa_info(), line(), bindings()) -> mfa_info().
 update_mfa_info(MFAInfo, Line, Bindings) ->
-  ClauseStructs = edts_rte_erlang:traverse_clause_struct(
+  ClauseStructs = edts_rte_util:traverse_clause_struct(
                     Line, MFAInfo#mfa_info.clause_structs),
   MFAInfo#mfa_info{ clause_structs = ClauseStructs
                   , line           = Line
