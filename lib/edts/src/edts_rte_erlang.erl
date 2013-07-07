@@ -29,7 +29,7 @@
         , expand_records/2
         , extract_fun_clauses_line_num/1
         , get_module_sorted_fun_info/1
-        , is_tail_recursion/3
+        , is_tail_call/3
         , read_and_add_records/2
         , traverse_clause_struct/2
         , var_to_val_in_fun/3
@@ -42,6 +42,8 @@
                        , sub_clause = undefined :: #clause_struct{}
                        , touched    = false     :: boolean()
                        }).
+
+-type clause_struct() :: #clause_struct{}.
 
 %%%_* API ======================================================================
 convert_list_to_term(Arguments, _RT) ->
@@ -192,13 +194,27 @@ get_module_sorted_fun_info(M) ->
     end, [], FunAritys),
   lists:reverse(lists:sort(AllLineFunAritys)).
 
-%% @doc To be able to see if it is a tail recursion, we need to check
-%%      if the the new line is either in the other clause of the
-%%      same function or it is in the same clause but the new line
-%%      is equal or smaller than the previous line.
-is_tail_recursion(ClauseStructs, PreviousLine, NewLine) ->
-  %% #clause_struct{line = L, sub_clause = ExprsLn, touched = Touched}
-  edts_rte:debug("8) is_tail_recursion:~p~n"
+%% @doc When MFA and depth are the same, check if it is still a
+%%      differnet function call.
+%%      This could happen when:
+%%      1) Tail recursion
+%%      2) When function with the same name are called within the
+%%         same expression.
+%%         e.g.
+%%         fib(N) ->
+%%           fib(N-1) + fib(N-2)
+%%
+%%         In the example above, fib(N-2) will be called immediately
+%%         after fib(N-1) is returned, making them have the same MFA
+%%         and Depth.
+%%
+%%      To check this, we need to see if the the new line is either in
+%%      the other clause of the same function or it is in the same clause
+%%      but the new line is equal or smaller than the previous line.
+-spec is_tail_call([clause_struct()], non_neg_integer(), non_neg_integer())
+                  -> boolean().
+is_tail_call(ClauseStructs, PreviousLine, NewLine) ->
+  edts_rte:debug("8) is_tail_call:~p~n"
             , [[ClauseStructs, PreviousLine, NewLine]]),
   {LineSmallerClauses, _LineBiggerClauses} =
     lists:splitwith(fun(#clause_struct{line = L}) ->
