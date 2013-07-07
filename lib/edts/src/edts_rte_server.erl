@@ -325,6 +325,7 @@ on_exit(undefined, State) ->
 on_exit(Result, State) ->
   AllReplacedFuns = print_mfa_info_tree(State#rte_state.mfa_info_tree),
   ok = send_result_to_clients(Result, concat_replaced_funs(AllReplacedFuns)),
+  io:format("======= allreplcedfuns: ~p~n",[AllReplacedFuns]),
   io:format("======= mfa_info_tree: ~p~n",[State#rte_state.mfa_info_tree]),
   State.
 
@@ -478,17 +479,14 @@ update_mfa_info(MFAInfo, Line, Bindings) ->
                   , bindings       = Bindings}.
 
 print_mfa_info_tree([MFAInfo])   ->
-  do_print_mfa_info_tree(MFAInfo#mfa_info.children, []);
-print_mfa_info_tree([_H1, H2|T]) ->
-  do_print_mfa_info_tree([H2|T], []).
+  lists:reverse(do_print_mfa_info_tree(MFAInfo#mfa_info.children, [])).
 
 do_print_mfa_info_tree([], Acc) ->
-  lists:reverse(Acc);
+  Acc;
 do_print_mfa_info_tree([MFAInfo|T], Acc0) ->
   ReplacedFun = make_replaced_fun(MFAInfo),
-  Acc = do_print_mfa_info_tree( MFAInfo#mfa_info.children
-                              , [{MFAInfo#mfa_info.key, ReplacedFun}|Acc0]),
-  do_print_mfa_info_tree(T, Acc).
+  Acc = do_print_mfa_info_tree(MFAInfo#mfa_info.children, Acc0),
+  do_print_mfa_info_tree(T, [{MFAInfo#mfa_info.key, ReplacedFun} | Acc]).
 
 %% @doc The name of the ETS table to store the tuple representation of
 %%      the records
