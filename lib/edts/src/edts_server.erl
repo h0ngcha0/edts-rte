@@ -284,7 +284,7 @@ do_init_node(Node, ProjectRoot, LibDirs) ->
                                               edts_dialyzer,
                                               edts_eunit,
                                               edts_rte,
-                                              edts_rte_erlang,
+                                              edts_rte_util,
                                               edts_rte_int_listener,
                                               edts_rte_server,
                                               edts_rte_sup,
