@@ -64,7 +64,6 @@
 -record(rte_state, { proc                  = unattached :: unattached
                                                          | pid()
                    , record_table          = undefined  :: atom()
-                   , depth                 = 0          :: depth()
                    , mfa_info_tree         = []         :: list()  %% FIXME type
                    , result                = undefined  :: term()
                    , module_cache          = []         :: list()  %% FIXME type
@@ -187,8 +186,7 @@ handle_call({rte_run, Module, Fun, Args0}, _From, State) ->
                       , children   = []
                       },
 
-  {reply, {ok, finished}, State#rte_state{ depth                 = 0
-                                         , module_cache          = []
+  {reply, {ok, finished}, State#rte_state{ module_cache          = []
                                          , proc                  = Pid
                                          , mfa_info_tree         = [MFAInfo]
                                          , result                = undefined
@@ -223,8 +221,7 @@ handle_cast({finished_attach, Pid}, State) ->
   {noreply, State};
 handle_cast({break_at, {Bindings, Module, Line, Depth}}, State0) ->
   {MFA, State} = get_mfa(State0, Module, Line),
-  edts_rte:debug("1) send_binding.. before step. old depth:~p , new_depth:~p~n"
-           , [State#rte_state.depth, Depth]),
+  edts_rte:debug("1) send_binding.. before step. depth:~p~n", [Depth]),
   edts_rte:debug("2) send_binding.. Line:~p, Bindings:~p~n",[Line, Bindings]),
 
   edts_rte:debug("3) new mfa:~p~n", [MFA]),
@@ -235,7 +232,7 @@ handle_cast({break_at, {Bindings, Module, Line, Depth}}, State0) ->
   %% continue to step
   edts_rte_int_listener:step(),
 
-  {noreply, State#rte_state{depth = Depth, mfa_info_tree = NewMFAInfoTree}};
+  {noreply, State#rte_state{mfa_info_tree = NewMFAInfoTree}};
 handle_cast(exit, #rte_state{result = RteResult} = State0) ->
   edts_rte:debug("rte server got exit~n"),
   State = on_exit(RteResult, State0),
@@ -325,8 +322,7 @@ on_exit(undefined, State) ->
 on_exit(Result, State) ->
   AllReplacedFuns = print_mfa_info_tree(State#rte_state.mfa_info_tree),
   ok = send_result_to_clients(Result, concat_replaced_funs(AllReplacedFuns)),
-  io:format("======= allreplcedfuns: ~p~n",[AllReplacedFuns]),
-  io:format("======= mfa_info_tree: ~p~n",[State#rte_state.mfa_info_tree]),
+  edts_rte:debug("======= mfa_info_tree: ~p~n",[State#rte_state.mfa_info_tree]),
   State.
 
 %% @doc Concat a list of replaced function strings together.
@@ -393,7 +389,7 @@ update_mfa_info_tree( {Mod, Fun, Arity}, Depth, Line, Bindings
         true ->
           %% if the interpreter just steps back to the father node
           %% just need to update this mfa_info element
-          NewChildren = set_current(Children, false),
+          NewChildren = set_current_false(Children),
           NewMFAInfo  = MFAInfo#mfa_info{ is_current = true
                                         , children   = NewChildren},
           [update_mfa_info(NewMFAInfo, Line, Bindings)];
@@ -408,7 +404,7 @@ update_mfa_info_tree( {Mod, Fun, Arity}, Depth, Line, Bindings
               %% Create a sibling if needed.
               NewSibling  = new_mfa_info( Mod, Fun, Arity, Depth
                                         , Line, Bindings),
-              NewChildren = set_current(Children, false) ++ [NewSibling],
+              NewChildren = set_current_false(Children) ++ [NewSibling],
               [MFAInfo#mfa_info{children = NewChildren}];
             false ->
               %% Otherwise continue the same process with the children
@@ -418,10 +414,26 @@ update_mfa_info_tree( {Mod, Fun, Arity}, Depth, Line, Bindings
           end
       end;
     false ->
-      %% Otherwise continue the same process with the children
-      NewChildren = update_mfa_info_tree( {Mod, Fun, Arity}, Depth, Line
-                                        , Bindings, Children),
-      [MFAInfo#mfa_info{children = NewChildren}]
+      case add_sibling_p(LastChild, {Mod, Fun, Arity, Depth}, Line, Depth) of
+        true  ->
+          NewSibling  = new_mfa_info( Mod, Fun, Arity, Depth
+                                    , Line, Bindings),
+          NewChildren = set_current_false(Children) ++ [NewSibling],
+          [MFAInfo#mfa_info{children = NewChildren}];
+        false ->
+          case MFAInfo#mfa_info.key =:= {Mod, Fun, Arity, Depth} of
+            true ->
+              NewChildren = set_current_false(Children),
+              NewMFAInfo  = MFAInfo#mfa_info{ is_current = true
+                                            , children   = NewChildren},
+              [update_mfa_info(NewMFAInfo, Line, Bindings)];
+            false ->
+              %% Otherwise continue the same process with the children
+              NewChildren = update_mfa_info_tree( {Mod, Fun, Arity}, Depth, Line
+                                                , Bindings, Children),
+              [MFAInfo#mfa_info{children = NewChildren}]
+          end
+      end
   end;
 update_mfa_info_tree({M, F, A}, Depth, Line, Bindings, [H|T]) ->
   %% only look at the rightmost line of mfa_info elements in the tree.
@@ -446,13 +458,13 @@ add_sibling_p(MFAInfo, NewKey, NewLine, NewDepth) ->
 
 %% @doc set the is_current property of the last sibling of this
 %%      mfa_info list.
--spec set_current([mfa_info()], boolean()) -> [mfa_info()].
-set_current([], _B)       ->
+-spec set_current_false([mfa_info()]) -> [mfa_info()].
+set_current_false([])       ->
   [];
-set_current([MFAInfo], B) ->
-  [MFAInfo#mfa_info{is_current = B}];
-set_current([H|T], B)     ->
-  [H|set_current(T, B)].
+set_current_false([MFAInfo|T]) ->
+  Children = MFAInfo#mfa_info.children,
+  [ MFAInfo#mfa_info{is_current = false, children = set_current_false(Children)}
+  | set_current_false(T)].
 
 %% @doc Create a new mfa_info element
 -spec new_mfa_info(module(), function(), arity(), depth(), line(), bindings())
@@ -483,10 +495,10 @@ print_mfa_info_tree([MFAInfo])   ->
 
 do_print_mfa_info_tree([], Acc) ->
   Acc;
-do_print_mfa_info_tree([MFAInfo|T], Acc0) ->
+do_print_mfa_info_tree([MFAInfo|T], Acc) ->
   ReplacedFun = make_replaced_fun(MFAInfo),
-  Acc = do_print_mfa_info_tree(MFAInfo#mfa_info.children, Acc0),
-  do_print_mfa_info_tree(T, [{MFAInfo#mfa_info.key, ReplacedFun} | Acc]).
+  AccChildren = do_print_mfa_info_tree(MFAInfo#mfa_info.children, []),
+  do_print_mfa_info_tree(T, Acc ++ [{MFAInfo#mfa_info.key, ReplacedFun} | AccChildren]).
 
 %% @doc The name of the ETS table to store the tuple representation of
 %%      the records
