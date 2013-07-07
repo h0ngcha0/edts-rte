@@ -354,10 +354,10 @@ update_mfa_info_tree( {Mod, Fun, Arity}, Depth, Line, Bindings
                     , [#mfa_info{is_current = true} = MFAInfo]) ->
   case MFAInfo#mfa_info.key =:= {Mod, Fun, Arity, Depth} of
     true  ->
-      %% assert that it can not be a tail recursion here. because
-      %% the tail recursion scenario should be handled by the
+      %% assert that it can not be a tail call here. because
+      %% the tail call scenario should be handled by the
       %% ancester of this element already.
-      false  = edts_rte_erlang:is_tail_recursion(
+      false  = edts_rte_erlang:is_tail_call(
                  MFAInfo#mfa_info.clause_structs,
                  MFAInfo#mfa_info.line, Line),
 
@@ -374,10 +374,7 @@ update_mfa_info_tree( {Mod, Fun, Arity}, Depth, Line, Bindings
 
       %% add a new child element at the end of the children list of
       %% the current mfa_info list.
-      Children   = MFAInfo#mfa_info.children,
-      NewMFAInfo = new_mfa_info(Mod, Fun, Arity, Depth, Line, Bindings),
-      [MFAInfo#mfa_info{ is_current = false
-                       , children   = Children ++ [NewMFAInfo]}]
+      [add_child(Mod, Fun, Arity, Depth, Line, Bindings, MFAInfo)]
   end;
 update_mfa_info_tree( {Mod, Fun, Arity}, Depth, Line, Bindings
                     , [#mfa_info{is_current = false} = MFAInfo]) ->
@@ -389,10 +386,7 @@ update_mfa_info_tree( {Mod, Fun, Arity}, Depth, Line, Bindings
         true ->
           %% if the interpreter just steps back to the father node
           %% just need to update this mfa_info element
-          NewChildren = set_current_false(Children),
-          NewMFAInfo  = MFAInfo#mfa_info{ is_current = true
-                                        , children   = NewChildren},
-          [update_mfa_info(NewMFAInfo, Line, Bindings)];
+          [update_self(MFAInfo, Line, Bindings)];
         false ->
           {_Mod0, _Fun0, _Arity0, DepthOfElem} = MFAInfo#mfa_info.key,
           %% assert
@@ -402,10 +396,7 @@ update_mfa_info_tree( {Mod, Fun, Arity}, Depth, Line, Bindings
           case add_sibling_p(LastChild, Key, Line, Depth) of
             true ->
               %% Create a sibling if needed.
-              NewSibling  = new_mfa_info( Mod, Fun, Arity, Depth
-                                        , Line, Bindings),
-              NewChildren = set_current_false(Children) ++ [NewSibling],
-              [MFAInfo#mfa_info{children = NewChildren}];
+              [add_child(Mod, Fun, Arity, Depth, Line, Bindings, MFAInfo)];
             false ->
               %% Otherwise continue the same process with the children
               NewChildren = update_mfa_info_tree( {Mod, Fun, Arity}, Depth, Line
@@ -416,17 +407,13 @@ update_mfa_info_tree( {Mod, Fun, Arity}, Depth, Line, Bindings
     false ->
       case add_sibling_p(LastChild, {Mod, Fun, Arity, Depth}, Line, Depth) of
         true  ->
-          NewSibling  = new_mfa_info( Mod, Fun, Arity, Depth
-                                    , Line, Bindings),
-          NewChildren = set_current_false(Children) ++ [NewSibling],
-          [MFAInfo#mfa_info{children = NewChildren}];
+          [add_child(Mod, Fun, Arity, Depth, Line, Bindings, MFAInfo)];
         false ->
           case MFAInfo#mfa_info.key =:= {Mod, Fun, Arity, Depth} of
             true ->
-              NewChildren = set_current_false(Children),
-              NewMFAInfo  = MFAInfo#mfa_info{ is_current = true
-                                            , children   = NewChildren},
-              [update_mfa_info(NewMFAInfo, Line, Bindings)];
+              %% if the interpreter just steps back to the GRAND-father node
+              %% just need to update this mfa_info element
+              [update_self(MFAInfo, Line, Bindings)];
             false ->
               %% Otherwise continue the same process with the children
               NewChildren = update_mfa_info_tree( {Mod, Fun, Arity}, Depth, Line
@@ -439,18 +426,36 @@ update_mfa_info_tree({M, F, A}, Depth, Line, Bindings, [H|T]) ->
   %% only look at the rightmost line of mfa_info elements in the tree.
   [H|update_mfa_info_tree({M, F, A}, Depth, Line, Bindings, T)].
 
+%% @doc Update current mfa_info element.
+-spec update_self(mfa_info(), line(), bindings()) -> mfa_info().
+update_self(MFAInfo0, Line, Bindings) ->
+  Children = set_current_false(MFAInfo0#mfa_info.children),
+  MFAInfo  = MFAInfo0#mfa_info{ is_current = true
+                              , children   = Children},
+  update_mfa_info(MFAInfo, Line, Bindings).
+
+%% @doc add a new child.
+-spec add_child( module(), function(), arity(), depth(), line()
+                 , bindings(), mfa_info()) -> mfa_info().
+add_child(Mod, Fun, Arity, Depth, Line, Bindings, MFAInfo) ->
+  Children    = MFAInfo#mfa_info.children,
+  NewSibling  = new_mfa_info( Mod, Fun, Arity, Depth, Line, Bindings),
+  NewChildren = set_current_false(Children) ++ [NewSibling],
+  MFAInfo#mfa_info{ is_current = false
+                  , children = NewChildren}.  
+  
 %% @doc Check if a sibling should be added for a mfa_info element. This
 %%      could happen in two scenarios:
 %%      1) the mfa is not the same, but the depth is the same
-%%      2) tail recursion (and its equivalent)
+%%      2) tail call
 add_sibling_p(MFAInfo, NewKey, NewLine, NewDepth) ->
   case MFAInfo#mfa_info.key =:= NewKey of
     true  ->
       %% this will rule out the case where we are stepping within
       %% the same function clause.
-      edts_rte_erlang:is_tail_recursion( MFAInfo#mfa_info.clause_structs
-                                       , MFAInfo#mfa_info.line
-                                       , NewLine);
+      edts_rte_erlang:is_tail_call( MFAInfo#mfa_info.clause_structs
+                                  , MFAInfo#mfa_info.line
+                                  , NewLine);
     false ->
       {_M, _F, _A, Depth} = MFAInfo#mfa_info.key,
       NewDepth =:= Depth
