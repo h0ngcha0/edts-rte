@@ -640,16 +640,23 @@ replace_var_with_val_in_expr(Expr, _ECLn, _Bs)                            ->
 
 replace_var_with_val({var, L, VariableName}, Bs) ->
   Value = proplists:get_value(VariableName, Bs),
-  do_replace(Value, L);
+  do_replace(VariableName, Value, L);
 replace_var_with_val(Other, _Bs)                 ->
   Other.
 
-do_replace(Value, L) ->
-  ValStr           = lists:flatten(io_lib:format("~p.", [Value])),
-  Tokens0          = get_tokens(ValStr),
+do_replace(VarName, Value, L) ->
+  ReplacedStr      = make_replaced_str(VarName, Value),
+  Tokens0          = get_tokens(ReplacedStr),
   Tokens           = maybe_replace_pid(Tokens0, Value),
   {ok, [ValForm]}  = erl_parse:parse_exprs(Tokens),
   replace_line_num(ValForm, L).
+
+make_replaced_str(VarName, Value) ->
+  lists:flatten(io_lib:format( "{~p,~p,~p}."
+                             , [special_symbol(), VarName, Value])).
+
+special_symbol() ->
+  "__edts_rte__".
 
 get_tokens(ValStr) ->
   {ok, Tokens, _} = erl_scan:string(ValStr),
