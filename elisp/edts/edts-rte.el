@@ -30,13 +30,13 @@ top of it"
          )
         (t
          (font-lock-remove-keywords
-          nil `(("\{\"__edts_rte__\",\\([^\(}\|,\)]+\\),\\([^\(}\|,\)]+\\)\}"
+          nil `((,(rte-regex)
                  (0 (progn (compose-region (match-beginning 0) (match-end 0)
                                            (buffer-substring (match-beginning 2) (match-end 2)))
              nil)))))
          (save-excursion
            (goto-char (point-min))
-           (while (re-search-forward "\{\"__edts_rte__\",\\([^\(}\|,\)]+\\),\\([^\(}\|,\)]+\\)\}" nil t)
+           (while (re-search-forward (rte-regex) nil t)
              (decompose-region (match-beginning 0) (match-end 0)))))))
 
 
@@ -45,11 +45,15 @@ top of it"
   "Replace the tuple {\"__edts-rte__\", VarName, Value} returned by edts rte
 with Value"
   (font-lock-add-keywords
-   mode `(("\{\"__edts_rte__\",\\([^\(}\|,\)]+\\),\\([^\(}\|,\)]+\\)\}"
+   mode `((,(rte-regex)
            (0 (progn (set-text-properties (match-beginning 0) (match-end 0) '(face hi-red-b))
                      (compose-region (match-beginning 0) (match-end 0)
                                      (buffer-substring (match-beginning 2) (match-end 2)))
                      nil))))))
+
+(defun rte-regex ()
+  "Regex to match the return replaced vars from the edts-rte"
+  "\{\"__edts_rte__\",\\([^\(}\|,\)]+\\),\\([^\(}\|,\)]+\\)\}")
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; edts-rte.el ends here
