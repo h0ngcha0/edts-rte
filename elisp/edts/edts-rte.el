@@ -46,13 +46,10 @@ top of it"
 with Value"
   (font-lock-add-keywords
    mode `(("\{\"__edts_rte__\",\\([^\(}\|,\)]+\\),\\([^\(}\|,\)]+\\)\}"
-   (0 (progn (compose-region (match-beginning 0) (match-end 0)
-                             (buffer-substring (match-beginning 2) (match-end 2)))
-      nil))))))
-
-;;(search-forward-regexp "\{\"__edts_rte__\",[^}]+\}")
-;;(search-forward-regexp "\{\"__edts_rte__\",[^\(}\|,\)]+,[^\(}\|,\)]+\}")
-;;(search-forward-regexp "\{\"__edts_rte__\",\\([^\(}\|,\)]+\\),\\([^\(}\|,\)]+\\)\}")
+           (0 (progn (set-text-properties (match-beginning 0) (match-end 0) '(face hi-red-b))
+                     (compose-region (match-beginning 0) (match-end 0)
+                                     (buffer-substring (match-beginning 2) (match-end 2)))
+                     nil))))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; edts-rte.el ends here
