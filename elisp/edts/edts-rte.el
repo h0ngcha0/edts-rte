@@ -11,15 +11,39 @@
 
 ;;;###autoload
 (defcustom edts-rte-auto-modes
-  '(edts-mode)
+  '(erlang-mode)
   "*Modes affected by `edts-rte-for-modes'."
   :type '(repeat symbol) :group 'edts-rte)
 
+;;;###autoload
+(define-minor-mode edts-rte-mode
+  "Display the replaced value returned by edts-rte.
+When edts-rte replaces a variable with a value, a tuple in the format
+of {\"__edts-rte__\", VarName, Value} is returned. Value should be displayed
+and VarName should be displayed in the pop up window when the cursor is on
+top of it"
+  :init-value nil
+  :lighter "-EDTS-RTE"
+  (cond (edts-rte-mode
+         (replace-rte-vars)
+         (font-lock-fontify-buffer)
+         )
+        (t
+         (font-lock-remove-keywords
+          nil `(("\{\"__edts_rte__\",\\([^\(}\|,\)]+\\),\\([^\(}\|,\)]+\\)\}"
+                 (0 (progn (compose-region (match-beginning 0) (match-end 0)
+                                           (buffer-substring (match-beginning 2) (match-end 2)))
+             nil)))))
+         (save-excursion
+           (goto-char (point-min))
+           (while (re-search-forward "\{\"__edts_rte__\",\\([^\(}\|,\)]+\\),\\([^\(}\|,\)]+\\)\}" nil t)
+             (decompose-region (match-beginning 0) (match-end 0)))))))
+
+
 (defun replace-rte-vars (&optional mode)
   (interactive)
-  "Display the word `lambda' as the Greek letter.
-Non-nil optional arg means use pretty-lambda display in that MODE.
-nil means use pretty-lambda display for the current mode."
+  "Replace the tuple {\"__edts-rte__\", VarName, Value} returned by edts rte
+with Value"
   (font-lock-add-keywords
    mode `(("\{\"__edts_rte__\",\\([^\(}\|,\)]+\\),\\([^\(}\|,\)]+\\)\}"
    (0 (progn (compose-region (match-beginning 0) (match-end 0)
