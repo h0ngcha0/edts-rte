@@ -513,7 +513,8 @@ White space here is any of: space, tab, emacs newline (line feed, ASCII 10)."
       (erase-buffer)
       (goto-char (point-max))
       (insert string)
-      (erlang-mode))))
+      (erlang-mode)
+      (edts-rte-mode))))
 
 ;; rte related end
 
