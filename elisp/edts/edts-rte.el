@@ -23,6 +23,7 @@ top of it"
          (highlight-rte-vars)
          (replace-rte-vars)
          (font-lock-fontify-buffer)
+         (activate-advice)
          )
         (t
          (message "turnning off")
@@ -34,8 +35,8 @@ top of it"
          (save-excursion
            (goto-char (point-min))
            (while (re-search-forward (rte-regex) nil t)
-             (decompose-region (match-beginning 0) (match-end 0)))))))
-
+             (decompose-region (match-beginning 0) (match-end 0))))
+         (deactivate-advice))))
 
 (defun highlight-rte-vars (&optional mode)
   (interactive)
@@ -54,10 +55,56 @@ with Value"
                                      (buffer-substring (match-beginning 2) (match-end 2)))
                      nil))))))
 
+(defun display-rte-var ()
+  "Display the variable name in the tuple {\"__edts-rte__\", VarName, Value}
+returned by edts rte"
+  (interactive)
+  (let* ((cur-point   (point))
+         (displayed-p nil))
+    (save-excursion
+      (goto-line (point-min))
+      (while (and (not displayed-p)
+                  (re-search-forward (rte-regex) nil t))
+        (if (and (>= cur-point (match-beginning 0))
+                 (<= cur-point (match-end 0)))
+            (progn (message (concat "Variable Name: "
+                                    (buffer-substring (match-beginning 1) (match-end 1))))
+                   (setq displayed-p t))
+          (message ""))))))
+
 (defun rte-regex ()
   "Regex to match the return replaced vars from the edts-rte"
   "\{\"__edts_rte__\",\\([^\(}\|,\)]+\\),\\([^\(}\|,\)]+\\)\}")
 
+(defadvice forward-char (after forward-display-rte-var)
+  "Advice for forward-char for displaying the rte variable name"
+  (display-rte-var))
+
+(defadvice backward-char (after backward-display-rte-var)
+  "Advice for backward-char for displaying the rte variable name"
+  (display-rte-var))
+
+(defadvice next-line (after next-line-display-rte-var)
+  "Advice for next-line for displaying the rte variable name"
+  (display-rte-var))
+
+(defadvice previous-line (after previous-line-display-rte-var)
+  "Advice for previous for displaying the rte variable name"
+  (display-rte-var))
+
+(defun activate-advice ()
+  (interactive)
+  "Activate all the advices"
+  (mapcar (lambda (advice) (ad-activate advice)) (rte-advices)))
+
+(defun deactivate-advice ()
+  (interactive)
+  "Deactivate all the advices"
+  (mapcar (lambda (advice) (ad-deactivate advice)) (rte-advices)))
+
+(defun rte-advices ()
+  "All the advices defined in edts rte mode"
+  '(forward-char backward-char next-line previous-line))
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; edts-rte.el ends here
-
