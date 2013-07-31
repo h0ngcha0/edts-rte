@@ -20,6 +20,7 @@ top of it"
   :lighter "-EDTS-RTE"
   (cond (edts-rte-mode
          (message "turning on")
+         (highlight-rte-vars)
          (replace-rte-vars)
          (font-lock-fontify-buffer)
          )
@@ -35,6 +36,12 @@ top of it"
            (while (re-search-forward (rte-regex) nil t)
              (decompose-region (match-beginning 0) (match-end 0)))))))
 
+
+(defun highlight-rte-vars (&optional mode)
+  (interactive)
+  "Highlight the tuple {\"__edts-rte__\", VarName, Value} returned by edts rte"
+  (font-lock-add-keywords
+   mode `((,(rte-regex) 0 'font-lock-warning-face prepend))))
 
 (defun replace-rte-vars (&optional mode)
   (interactive)
