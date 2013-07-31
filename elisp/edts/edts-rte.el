@@ -54,10 +54,37 @@ with Value"
                                      (buffer-substring (match-beginning 2) (match-end 2)))
                      nil))))))
 
+(defun display-rte-var ()
+  "Display the variable name in the tuple {\"__edts-rte__\", VarName, Value}
+returned by edts rte"
+  (interactive)
+  (let* ((cur-point   (point))
+         (displayed-p nil))
+    (save-excursion
+      (goto-line (point-min))
+      (while (and (not displayed-p)
+                  (re-search-forward (rte-regex) nil t))
+        (if (and (>= cur-point (match-beginning 0))
+                 (<= cur-point (match-end 0)))
+            (progn (message (concat "Variable Name: "
+                                    (buffer-substring (match-beginning 1) (match-end 1))))
+                   (setq displayed-p t))
+          (message ""))))))
+
 (defun rte-regex ()
   "Regex to match the return replaced vars from the edts-rte"
   "\{\"__edts_rte__\",\\([^\(}\|,\)]+\\),\\([^\(}\|,\)]+\\)\}")
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; edts-rte.el ends here
+
+
+
+
+
+
+
+
+
+
 
