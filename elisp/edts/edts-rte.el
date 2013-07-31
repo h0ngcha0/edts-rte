@@ -71,20 +71,16 @@ returned by edts rte"
                    (setq displayed-p t))
           (message ""))))))
 
+(defadvice forward-char (after edts-rte-display-var)
+  "Advice for forward-char for displaying the rte variable name"
+  (display-rte-var))
+
+;; Activate the forward-char advice
+(ad-activate 'forward-char)
+
 (defun rte-regex ()
   "Regex to match the return replaced vars from the edts-rte"
   "\{\"__edts_rte__\",\\([^\(}\|,\)]+\\),\\([^\(}\|,\)]+\\)\}")
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; edts-rte.el ends here
-
-
-
-
-
-
-
-
-
-
-
