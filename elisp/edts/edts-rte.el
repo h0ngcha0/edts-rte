@@ -10,12 +10,6 @@
 ;;; Code:
 
 ;;;###autoload
-(defcustom edts-rte-auto-modes
-  '(erlang-mode)
-  "*Modes affected by `edts-rte-for-modes'."
-  :type '(repeat symbol) :group 'edts-rte)
-
-;;;###autoload
 (define-minor-mode edts-rte-mode
   "Display the replaced value returned by edts-rte.
 When edts-rte replaces a variable with a value, a tuple in the format
@@ -25,10 +19,13 @@ top of it"
   :init-value nil
   :lighter "-EDTS-RTE"
   (cond (edts-rte-mode
+         (message "turning on")
+         (highlight-rte-vars)
          (replace-rte-vars)
          (font-lock-fontify-buffer)
          )
         (t
+         (message "turnning off")
          (font-lock-remove-keywords
           nil `((,(rte-regex)
                  (0 (progn (compose-region (match-beginning 0) (match-end 0)
@@ -40,13 +37,19 @@ top of it"
              (decompose-region (match-beginning 0) (match-end 0)))))))
 
 
+(defun highlight-rte-vars (&optional mode)
+  (interactive)
+  "Highlight the tuple {\"__edts-rte__\", VarName, Value} returned by edts rte"
+  (font-lock-add-keywords
+   mode `((,(rte-regex) 0 'font-lock-warning-face prepend))))
+
 (defun replace-rte-vars (&optional mode)
   (interactive)
   "Replace the tuple {\"__edts-rte__\", VarName, Value} returned by edts rte
 with Value"
   (font-lock-add-keywords
    mode `((,(rte-regex)
-           (0 (progn (set-text-properties (match-beginning 0) (match-end 0) '(face hi-red-b))
+           (0 (progn ;;(set-text-properties (match-beginning 0) (match-end 0) '(face hi-red-b))
                      (compose-region (match-beginning 0) (match-end 0)
                                      (buffer-substring (match-beginning 2) (match-end 2)))
                      nil))))))
