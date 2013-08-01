@@ -25,18 +25,18 @@ top of it"
          (font-lock-fontify-buffer))
         (t
          (font-lock-remove-keywords
-          nil `((,(rte-regex) 0 'font-lock-warning-face prepend)))
+          nil (rte-keywords))
          (save-excursion
            (goto-char (point-min))
            (while (re-search-forward (rte-regex) nil t)
              (funcall (switch-invisible) nil)))
          (deactivate-advice))))
 
-(defun highlight-rte-vars (&optional mode)
+(defun highlight-rte-vars ()
   (interactive)
   "Highlight the tuple {\"__edts-rte__\", VarName, Value} returned by edts rte"
   (font-lock-add-keywords
-   mode `((,(rte-regex) 0 'font-lock-warning-face prepend))))
+   nil (rte-keywords)))
 
 (defun replace-rte-vars ()
   "Replace the tuple {\"__edts-rte__\", VarName, Value} returned by edts rte
@@ -106,6 +106,11 @@ value returned by rte."
   (lambda (flag)
     (put-text-property (match-beginning 0) (match-beginning 2) 'invisible flag)
     (put-text-property (match-end 2) (match-end 0) 'invisible flag)))
+
+(defun rte-keywords ()
+  "Keywords in edts-rte mode that needs to be added to font lock"
+  `((,(rte-regex) 0 'font-lock-warning-face prepend)
+    ("^\\(\\.+\\)" 0 'highlight prepend)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; edts-rte.el ends here

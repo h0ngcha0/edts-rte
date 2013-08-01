@@ -512,7 +512,7 @@ concat_funs_str(ReplacedFuns) ->
   lists:foldl(
     fun({{M, F, A, D}, RplFun}, RplFuns) ->
         lists:flatten(
-          io_lib:format( "~s~n~s~n~s~n"
+          io_lib:format( "~s~n~s~n~s"
                        , [make_comments_str(M, F, A, D), RplFun, RplFuns]))
     end, [], ReplacedFuns).
 
@@ -527,7 +527,7 @@ make_comments_str(M, F, A, D) ->
 
 indent_str(D) ->
   OneIndent = string:copies(indent_unit(), level_indent()),
-  string:copies(OneIndent, (D-2)).
+  indent_unit() ++ string:copies(OneIndent, (D-2)).
 
 %% @doc the indent between levels
 level_indent() ->
@@ -535,7 +535,7 @@ level_indent() ->
 
 %% @doc The unit for indentation. Prefer space.
 indent_unit() ->
-  " ".
+  ".".
 
 %% @doc Send the function body back to Clients.
 send_result_to_clients(RteResult, FunBody) ->
