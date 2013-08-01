@@ -19,23 +19,17 @@ top of it"
   :init-value nil
   :lighter "-EDTS-RTE"
   (cond (edts-rte-mode
-         (message "turning on")
          (highlight-rte-vars)
          (replace-rte-vars)
-         (font-lock-fontify-buffer)
          (activate-advice)
-         )
+         (font-lock-fontify-buffer))
         (t
-         (message "turnning off")
          (font-lock-remove-keywords
-          nil `((,(rte-regex)
-                 (0 (progn (compose-region (match-beginning 0) (match-end 0)
-                                           (buffer-substring (match-beginning 2) (match-end 2)))
-             nil)))))
+          nil `((,(rte-regex) 0 'font-lock-warning-face prepend)))
          (save-excursion
            (goto-char (point-min))
            (while (re-search-forward (rte-regex) nil t)
-             (decompose-region (match-beginning 0) (match-end 0))))
+             (funcall (switch-invisible) nil)))
          (deactivate-advice))))
 
 (defun highlight-rte-vars (&optional mode)
@@ -44,16 +38,14 @@ top of it"
   (font-lock-add-keywords
    mode `((,(rte-regex) 0 'font-lock-warning-face prepend))))
 
-(defun replace-rte-vars (&optional mode)
-  (interactive)
+(defun replace-rte-vars ()
   "Replace the tuple {\"__edts-rte__\", VarName, Value} returned by edts rte
 with Value"
-  (font-lock-add-keywords
-   mode `((,(rte-regex)
-           (0 (progn ;;(set-text-properties (match-beginning 0) (match-end 0) '(face hi-red-b))
-                     (compose-region (match-beginning 0) (match-end 0)
-                                     (buffer-substring (match-beginning 2) (match-end 2)))
-                     nil))))))
+  (interactive)
+  (save-excursion
+      (goto-line (point-min))
+      (while (re-search-forward (rte-regex) nil t)
+        (funcall (switch-invisible) t))))
 
 (defun display-rte-var ()
   "Display the variable name in the tuple {\"__edts-rte__\", VarName, Value}
@@ -67,8 +59,10 @@ returned by edts rte"
                   (re-search-forward (rte-regex) nil t))
         (if (and (>= cur-point (match-beginning 0))
                  (<= cur-point (match-end 0)))
-            (progn (message (concat "Variable Name: "
+            (progn (put-text-property (match-beginning 1) (match-end 1) 'invisible nil)
+                   (message (concat "Variable Name: "
                                     (buffer-substring (match-beginning 1) (match-end 1))))
+                   (put-text-property (match-beginning 1) (match-end 1) 'invisible t)
                    (setq displayed-p t))
           (message ""))))))
 
@@ -105,6 +99,13 @@ returned by edts rte"
 (defun rte-advices ()
   "All the advices defined in edts rte mode"
   '(forward-char backward-char next-line previous-line))
+
+(defun switch-invisible ()
+  "Return a function to switch the invisible property for the part of the
+value returned by rte."
+  (lambda (flag)
+    (put-text-property (match-beginning 0) (match-beginning 2) 'invisible flag)
+    (put-text-property (match-end 2) (match-end 0) 'invisible flag)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; edts-rte.el ends here
