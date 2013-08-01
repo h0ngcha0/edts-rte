@@ -19,21 +19,17 @@ top of it"
   :init-value nil
   :lighter "-EDTS-RTE"
   (cond (edts-rte-mode
-         (message "turning on")
          (highlight-rte-vars)
          (replace-rte-vars)
          (activate-advice)
          (font-lock-fontify-buffer))
         (t
-         (message "turnning off")
          (font-lock-remove-keywords
           nil `((,(rte-regex) 0 'font-lock-warning-face prepend)))
          (save-excursion
            (goto-char (point-min))
            (while (re-search-forward (rte-regex) nil t)
-             (put-text-property (match-beginning 0) (match-beginning 2) 'invisible nil)
-             (put-text-property (match-end 2) (match-end 0) 'invisible nil)
-             ))
+             (funcall (switch-invisible) nil)))
          (deactivate-advice))))
 
 (defun highlight-rte-vars (&optional mode)
@@ -49,9 +45,7 @@ with Value"
   (save-excursion
       (goto-line (point-min))
       (while (re-search-forward (rte-regex) nil t)
-        (put-text-property (match-beginning 0) (match-beginning 2) 'invisible t)
-        (put-text-property (match-end 2) (match-end 0) 'invisible t)
-        )))
+        (funcall (switch-invisible) t))))
 
 (defun display-rte-var ()
   "Display the variable name in the tuple {\"__edts-rte__\", VarName, Value}
@@ -105,6 +99,13 @@ returned by edts rte"
 (defun rte-advices ()
   "All the advices defined in edts rte mode"
   '(forward-char backward-char next-line previous-line))
+
+(defun switch-invisible ()
+  "Return a function to switch the invisible property for the part of the
+value returned by rte."
+  (lambda (flag)
+    (put-text-property (match-beginning 0) (match-beginning 2) 'invisible flag)
+    (put-text-property (match-end 2) (match-end 0) 'invisible flag)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; edts-rte.el ends here
