@@ -22,20 +22,18 @@ top of it"
          (message "turning on")
          (highlight-rte-vars)
          (replace-rte-vars)
-         (font-lock-fontify-buffer)
          (activate-advice)
-         )
+         (font-lock-fontify-buffer))
         (t
          (message "turnning off")
          (font-lock-remove-keywords
-          nil `((,(rte-regex)
-                 (0 (progn (compose-region (match-beginning 0) (match-end 0)
-                                           (buffer-substring (match-beginning 2) (match-end 2)))
-             nil)))))
+          nil `((,(rte-regex) 0 'font-lock-warning-face prepend)))
          (save-excursion
            (goto-char (point-min))
            (while (re-search-forward (rte-regex) nil t)
-             (decompose-region (match-beginning 0) (match-end 0))))
+             (put-text-property (match-beginning 0) (match-beginning 2) 'invisible nil)
+             (put-text-property (match-end 2) (match-end 0) 'invisible nil)
+             ))
          (deactivate-advice))))
 
 (defun highlight-rte-vars (&optional mode)
@@ -44,16 +42,16 @@ top of it"
   (font-lock-add-keywords
    mode `((,(rte-regex) 0 'font-lock-warning-face prepend))))
 
-(defun replace-rte-vars (&optional mode)
-  (interactive)
+(defun replace-rte-vars ()
   "Replace the tuple {\"__edts-rte__\", VarName, Value} returned by edts rte
 with Value"
-  (font-lock-add-keywords
-   mode `((,(rte-regex)
-           (0 (progn ;;(set-text-properties (match-beginning 0) (match-end 0) '(face hi-red-b))
-                     (compose-region (match-beginning 0) (match-end 0)
-                                     (buffer-substring (match-beginning 2) (match-end 2)))
-                     nil))))))
+  (interactive)
+  (save-excursion
+      (goto-line (point-min))
+      (while (re-search-forward (rte-regex) nil t)
+        (put-text-property (match-beginning 0) (match-beginning 2) 'invisible t)
+        (put-text-property (match-end 2) (match-end 0) 'invisible t)
+        )))
 
 (defun display-rte-var ()
   "Display the variable name in the tuple {\"__edts-rte__\", VarName, Value}
