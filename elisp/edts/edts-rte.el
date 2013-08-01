@@ -25,7 +25,9 @@ top of it"
          (font-lock-fontify-buffer))
         (t
          (font-lock-remove-keywords
-          nil `((,(rte-regex) 0 'font-lock-warning-face prepend)))
+          nil `((,(rte-regex) 0 'font-lock-warning-face prepend)
+                ("^\\(\\.+\\)" 0 'highlight prepend)
+                ))
          (save-excursion
            (goto-char (point-min))
            (while (re-search-forward (rte-regex) nil t)
@@ -36,7 +38,9 @@ top of it"
   (interactive)
   "Highlight the tuple {\"__edts-rte__\", VarName, Value} returned by edts rte"
   (font-lock-add-keywords
-   mode `((,(rte-regex) 0 'font-lock-warning-face prepend))))
+   mode `((,(rte-regex) 0 'font-lock-warning-face prepend)
+          ("^\\(\\.+\\)" 0 'highlight prepend)
+          )))
 
 (defun replace-rte-vars ()
   "Replace the tuple {\"__edts-rte__\", VarName, Value} returned by edts rte
