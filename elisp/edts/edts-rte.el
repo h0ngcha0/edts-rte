@@ -65,8 +65,10 @@ returned by edts rte"
                   (re-search-forward (rte-regex) nil t))
         (if (and (>= cur-point (match-beginning 0))
                  (<= cur-point (match-end 0)))
-            (progn (message (concat "Variable Name: "
+            (progn (put-text-property (match-beginning 1) (match-end 1) 'invisible nil)
+                   (message (concat "Variable Name: "
                                     (buffer-substring (match-beginning 1) (match-end 1))))
+                   (put-text-property (match-beginning 1) (match-end 1) 'invisible t)
                    (setq displayed-p t))
           (message ""))))))
 
